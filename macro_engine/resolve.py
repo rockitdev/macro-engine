@@ -96,10 +96,17 @@ def search(con: sqlite3.Connection, query: str, limit: int = 8) -> list[dict]:
         if not rows:
             rows = _fts_query(con, " OR ".join(f"{w}*" for w in words), 50)
 
+    qwords = {w.rstrip("s") for w in words}
+
     def score(r: sqlite3.Row) -> float:
         s = r["rank"]  # bm25: more negative = better match
         s += SOURCE_RANK.get(r["source"], 5) * 0.3
-        s += len(r["name"]) / 120.0  # prefer shorter, plainer names
+        s += len(r["name"]) / 30.0  # short-name preference: plain foods beat composites
+        # USDA names lead with the food itself ("Apples, raw", "Egg, whole") —
+        # a first-word hit beats composites like "Strudel, apple"
+        first = _fts_words(r["name"])
+        if first and first[0].rstrip("s") in qwords:
+            s -= 2.0
         if r["kcal"] is None:
             s += 5.0  # useless without macros
         return s

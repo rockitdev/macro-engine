@@ -109,11 +109,24 @@ def load_dataset(con, name: str, raw_dir: Path) -> int:
         if row.get("data_type") in cfg["data_types"]:
             wanted_ids.add(row["fdc_id"])
 
+    def _col_for(nutrient_id: str):
+        # FNDDS survey CSVs put the nutrient *number* (203, 208...) in the
+        # nutrient_id column instead of nutrient.id — accept either keying.
+        hit = nutrient_col.get(nutrient_id)
+        if hit:
+            return hit
+        nbr = _norm_nbr(nutrient_id)
+        if nbr in NBR_MAP:
+            return NBR_MAP[nbr]
+        if nbr in KCAL_NBRS:
+            return f"kcal:{nbr}"
+        return None
+
     # Accumulate per-food nutrient values (files are per-100g)
     nutrients: dict[str, dict] = {}
     for row in _read_csv(folder / "food_nutrient.csv"):
         fdc_id = row["fdc_id"]
-        col = nutrient_col.get(row["nutrient_id"])
+        col = _col_for(row["nutrient_id"])
         if col is None or fdc_id not in wanted_ids:
             continue
         try:

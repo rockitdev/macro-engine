@@ -80,6 +80,19 @@ class MacroEngineTest(unittest.TestCase):
         self.assertAlmostEqual(out["remaining"]["protein_g"],
                                180 - (12.6 + 7.1 + 1.3), delta=0.3)
 
+    def test_unit_synonym_tbsp(self):
+        out = tracker.log_meal(self.con, [{"query": "peanut butter", "qty": 2,
+                                           "unit": "tbsp"}], date="2026-07-08")
+        self.assertEqual(out["logged"][0]["grams"], 32.0)  # 2 x '1 tbsp' 16 g
+
+    def test_default_portion_prefers_medium(self):
+        self.con.execute(
+            "INSERT INTO portions (food_id, label, grams) VALUES (?, '1 cup, mashed', 225)",
+            (self.ids["Bananas"],))
+        # '1 medium' (118 g) must win over the cup portion regardless of order
+        out = tracker.log_meal(self.con, [{"query": "banana"}], date="2026-07-08")
+        self.assertEqual(out["logged"][0]["grams"], 118.0)
+
     def test_manual_estimate_flagged(self):
         out = tracker.log_meal(
             self.con,

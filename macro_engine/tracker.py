@@ -11,9 +11,29 @@ from . import resolve
 
 MACROS = ("kcal", "protein_g", "carb_g", "fat_g")
 
+UNIT_SYNONYMS = {
+    "tbsp": "tablespoon", "tbs": "tablespoon", "tsp": "teaspoon",
+    "oz": "ounce", "ozs": "ounce", "lb": "pound", "lbs": "pound",
+}
+
 
 def _today() -> str:
     return _dt.date.today().isoformat()
+
+
+def _default_portion_rank(label: str) -> int:
+    """USDA foods carry many portions; when the user gives no unit, prefer the
+    everyday one ('1 medium' banana, '1 large' egg) over '1 cup, mashed'."""
+    l = label.lower()
+    if "medium" in l:
+        return 0
+    if "large" in l:
+        return 1
+    if "small" in l:
+        return 2
+    if l.startswith("1 "):
+        return 3
+    return 4
 
 
 def _resolve_grams(con: sqlite3.Connection, food: dict, item: dict, alias_grams=None) -> tuple[float, str]:
@@ -25,13 +45,14 @@ def _resolve_grams(con: sqlite3.Connection, food: dict, item: dict, alias_grams=
     portions = resolve.get_portions(con, food["id"])
     unit = (item.get("unit") or "").strip().lower()
     if unit:
+        variants = {unit, UNIT_SYNONYMS.get(unit, unit)}
         for p in portions:
-            if unit in p["label"].lower():
+            if any(v in p["label"].lower() for v in variants):
                 return qty * p["grams"], f"{qty:g} x {p['label']}"
     if alias_grams:
         return qty * float(alias_grams), f"{qty:g} x usual ({alias_grams:g} g)"
     if portions:
-        p = portions[0]
+        p = min(portions, key=lambda p: _default_portion_rank(p["label"]))
         return qty * p["grams"], f"{qty:g} x {p['label']}"
     return qty * 100.0, f"{qty * 100:g} g (no portion data)"
 

@@ -128,6 +128,23 @@ class MacroEngineTest(unittest.TestCase):
         self.assertTrue(tracker.delete_log_entry(self.con, log_id))
         self.assertEqual(tracker.day_totals(self.con, "2026-07-08")["kcal"], 0)
 
+    def test_add_food_store_searchable(self):
+        out = tracker.add_food(
+            self.con, "Breaded Chicken Burgers", kcal=210, protein_g=14,
+            carb_g=17, fat_g=9, brand="Janes", store="Costco",
+            portion_label="1 burger", portion_grams=113,
+            macros_are_per_portion=True,
+            alias="breaded chicken burgers from costco")
+        # store name matches even though it's not in the food name
+        hit = resolve.search(self.con, "chicken burgers costco")[0]
+        self.assertEqual(hit["id"], out["food_id"])
+        # alias resolves and logs one burger by default
+        logged = tracker.log_meal(
+            self.con, [{"query": "breaded chicken burgers from costco"}],
+            date="2026-07-08")
+        self.assertEqual(logged["logged"][0]["grams"], 113.0)
+        self.assertAlmostEqual(logged["logged"][0]["kcal"], 210, delta=1)
+
     def test_etl_reruns_keep_food_ids_stable(self):
         fid = self.con.execute(
             """INSERT INTO foods (name, source, source_id) VALUES ('Bananas, raw v2',

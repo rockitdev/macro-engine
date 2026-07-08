@@ -43,7 +43,7 @@ def lookup_alias(con: sqlite3.Connection, phrase: str):
 
 def get_food(con: sqlite3.Connection, food_id: int):
     row = con.execute(
-        """SELECT f.id, f.name, f.brand, f.source, f.verified,
+        """SELECT f.id, f.name, f.brand, f.store, f.source, f.verified,
                   n.kcal, n.protein_g, n.carb_g, n.fat_g, n.fiber_g
            FROM foods f LEFT JOIN food_nutrients n ON n.food_id = f.id
            WHERE f.id = ?""",
@@ -62,7 +62,7 @@ def get_portions(con: sqlite3.Connection, food_id: int) -> list[dict]:
 
 def _fts_query(con: sqlite3.Connection, match_expr: str, limit: int) -> list[sqlite3.Row]:
     return con.execute(
-        """SELECT f.id, f.name, f.brand, f.source, f.verified,
+        """SELECT f.id, f.name, f.brand, f.store, f.source, f.verified,
                   n.kcal, n.protein_g, n.carb_g, n.fat_g, n.fiber_g,
                   bm25(food_fts) AS rank
            FROM food_fts

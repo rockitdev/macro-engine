@@ -198,6 +198,44 @@ def delete_log_entry(con: sqlite3.Connection, log_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def add_food(con: sqlite3.Connection, name: str, kcal: float, protein_g: float,
+             carb_g: float, fat_g: float, fiber_g: float | None = None,
+             brand: str | None = None, store: str | None = None,
+             portion_label: str | None = None, portion_grams: float | None = None,
+             macros_are_per_portion: bool = False,
+             alias: str | None = None) -> dict:
+    """Add a custom food (source='manual'). Macros are per 100 g unless
+    macros_are_per_portion=True, in which case portion_grams is required and
+    values are scaled to 100 g for storage."""
+    if macros_are_per_portion:
+        if not portion_grams:
+            raise ValueError("macros_are_per_portion requires portion_grams")
+        f = 100.0 / float(portion_grams)
+        kcal, protein_g, carb_g, fat_g = (round(v * f, 1) for v in
+                                          (kcal, protein_g, carb_g, fat_g))
+        fiber_g = round(fiber_g * f, 1) if fiber_g is not None else None
+    food_id = con.execute(
+        "INSERT INTO foods (name, brand, store, source) VALUES (?, ?, ?, 'manual') "
+        "RETURNING id",
+        (name.strip(), brand, store)).fetchone()[0]
+    con.execute(
+        "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g, fiber_g) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (food_id, kcal, protein_g, carb_g, fat_g, fiber_g))
+    if portion_label and portion_grams:
+        con.execute("INSERT INTO portions (food_id, label, grams) VALUES (?, ?, ?)",
+                    (food_id, portion_label, portion_grams))
+    con.execute("INSERT INTO food_fts (rowid, name, brand, store) VALUES (?, ?, ?, ?)",
+                (food_id, name.strip(), brand or "", store or ""))
+    con.commit()
+    out = {"food_id": food_id, "name": name.strip(), "brand": brand, "store": store,
+           "kcal_per_100g": kcal}
+    if alias:
+        out["alias"] = add_alias(con, alias, food_id,
+                                 portion_grams if portion_label else None)
+    return out
+
+
 def add_alias(con: sqlite3.Connection, phrase: str, food_id: int,
               default_grams: float | None = None) -> dict:
     food = resolve.get_food(con, food_id)

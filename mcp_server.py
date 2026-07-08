@@ -21,7 +21,11 @@ mcp = FastMCP(
         "or supply a manual macros estimate. When the user corrects a wrong "
         "match, fix the log (delete_log_entry + re-log) AND save an alias so it "
         "resolves right next time. Log immediately — never block on ambiguity; "
-        "prefer a flagged estimate over asking twice."
+        "prefer a flagged estimate over asking twice. Store-qualified phrases "
+        "('the breaded chicken burgers from Costco') are pantry items: search "
+        "first (store names are indexed), and on a miss research the actual "
+        "product's label, add_food with store + the user's phrase as alias, then "
+        "log. One-time setup, zero-friction forever."
     ),
 )
 
@@ -96,6 +100,31 @@ def set_targets(kcal: float, protein_g: float, carb_g: float, fat_g: float,
     con = _con()
     try:
         return tracker.set_targets(con, kcal, protein_g, carb_g, fat_g, effective_date)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def add_food(name: str, kcal: float, protein_g: float, carb_g: float, fat_g: float,
+             fiber_g: float | None = None, brand: str | None = None,
+             store: str | None = None, portion_label: str | None = None,
+             portion_grams: float | None = None,
+             macros_are_per_portion: bool = False,
+             alias: str | None = None) -> dict:
+    """Add a custom food the database doesn't have — pantry staples the user
+    knows by store ('the chicken burgers from Costco'), local products, home
+    staples. Macros are per 100 g unless macros_are_per_portion=True (then
+    portion_grams is required and values are read as per-portion, e.g. straight
+    off the label: 1 burger 113 g, 210 kcal). Set store so future 'from costco'
+    phrases match, portion_label/grams for natural quantities ('1 burger'),
+    and alias to the user's exact phrasing so next time resolves instantly.
+    Use real label data when you can get it; only estimate when you can't,
+    and say so."""
+    con = _con()
+    try:
+        return tracker.add_food(con, name, kcal, protein_g, carb_g, fat_g,
+                                fiber_g, brand, store, portion_label,
+                                portion_grams, macros_are_per_portion, alias)
     finally:
         con.close()
 

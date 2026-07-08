@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS foods (
     id        INTEGER PRIMARY KEY,
     name      TEXT NOT NULL,
     brand     TEXT,
+    -- where Ryan buys it ("Costco") — people remember store, not brand
+    store     TEXT,
     -- fdc_foundation | fdc_sr_legacy | fdc_survey | off | scrape:<chain> | recipe | manual
     source    TEXT NOT NULL,
     source_id TEXT,
@@ -87,8 +89,15 @@ CREATE TABLE IF NOT EXISTS targets (
     created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS food_fts USING fts5(name, brand, content='', tokenize='porter unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS food_fts USING fts5(name, brand, store, content='', tokenize='porter unicode61');
 """
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    cols = {r["name"] for r in con.execute("PRAGMA table_info(foods)")}
+    if "store" not in cols:
+        con.execute("ALTER TABLE foods ADD COLUMN store TEXT")
+        rebuild_fts(con)  # FTS gained the store column
 
 
 def connect(db_path=None) -> sqlite3.Connection:
@@ -99,6 +108,7 @@ def connect(db_path=None) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
 
 
@@ -106,9 +116,9 @@ def rebuild_fts(con: sqlite3.Connection) -> None:
     """Drop and rebuild the contentless FTS index from foods (contentless
     tables can't delete rows, so ETL re-runs rebuild instead)."""
     con.execute("DROP TABLE IF EXISTS food_fts")
-    con.execute("CREATE VIRTUAL TABLE food_fts USING fts5(name, brand, content='', tokenize='porter unicode61')")
+    con.execute("CREATE VIRTUAL TABLE food_fts USING fts5(name, brand, store, content='', tokenize='porter unicode61')")
     con.execute(
-        "INSERT INTO food_fts(rowid, name, brand) "
-        "SELECT id, name, COALESCE(brand, '') FROM foods"
+        "INSERT INTO food_fts(rowid, name, brand, store) "
+        "SELECT id, name, COALESCE(brand, ''), COALESCE(store, '') FROM foods"
     )
     con.commit()

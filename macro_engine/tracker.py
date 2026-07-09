@@ -183,8 +183,9 @@ def remaining(con: sqlite3.Connection, date: str | None = None) -> dict:
 def day_log(con: sqlite3.Connection, date: str | None = None) -> list[dict]:
     date = date or _today()
     rows = con.execute(
-        """SELECT l.id AS log_id, l.ts, l.qty_desc, l.grams, l.kcal, l.protein_g,
-                  l.carb_g, l.fat_g, l.estimated, COALESCE(f.name, l.qty_desc) AS name
+        """SELECT l.id AS log_id, l.ts, l.food_id, l.qty_desc, l.grams, l.kcal,
+                  l.protein_g, l.carb_g, l.fat_g, l.estimated,
+                  COALESCE(f.name, l.qty_desc) AS name
            FROM log l LEFT JOIN foods f ON f.id = l.food_id
            WHERE l.date = ? ORDER BY l.id""",
         (date,),

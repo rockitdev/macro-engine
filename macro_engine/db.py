@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS targets (
     protein_g      REAL NOT NULL,
     carb_g         REAL NOT NULL,
     fat_g          REAL NOT NULL,
+    fiber_g        REAL,
     created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -98,6 +99,9 @@ def _migrate(con: sqlite3.Connection) -> None:
     if "store" not in cols:
         con.execute("ALTER TABLE foods ADD COLUMN store TEXT")
         rebuild_fts(con)  # FTS gained the store column
+    tcols = {r["name"] for r in con.execute("PRAGMA table_info(targets)")}
+    if "fiber_g" not in tcols:
+        con.execute("ALTER TABLE targets ADD COLUMN fiber_g REAL")
 
 
 def connect(db_path=None) -> sqlite3.Connection:

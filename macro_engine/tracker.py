@@ -9,7 +9,7 @@ import sqlite3
 
 from . import resolve
 
-MACROS = ("kcal", "protein_g", "carb_g", "fat_g")
+MACROS = ("kcal", "protein_g", "carb_g", "fat_g", "fiber_g")
 
 UNIT_SYNONYMS = {
     "tbsp": "tablespoon", "tbs": "tablespoon", "tsp": "teaspoon",
@@ -73,7 +73,7 @@ def log_meal(con: sqlite3.Connection, items: list[dict], date: str | None = None
     for item in items:
         if item.get("macros") is not None:
             m = item["macros"]
-            vals = {k: float(m.get(k) or 0) for k in (*MACROS, "fiber_g")}
+            vals = {k: float(m.get(k) or 0) for k in MACROS}
             cur = con.execute(
                 """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
                                     carb_g, fat_g, fiber_g, raw_text, estimated)
@@ -110,7 +110,7 @@ def log_meal(con: sqlite3.Connection, items: list[dict], date: str | None = None
 
         grams, qty_desc = _resolve_grams(con, food, item, alias_grams)
         scale = grams / 100.0
-        vals = {k: round((food.get(k) or 0) * scale, 1) for k in (*MACROS, "fiber_g")}
+        vals = {k: round((food.get(k) or 0) * scale, 1) for k in MACROS}
         cur = con.execute(
             """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
                                 carb_g, fat_g, fiber_g, raw_text, estimated)
@@ -148,7 +148,7 @@ def day_totals(con: sqlite3.Connection, date: str | None = None) -> dict:
 def get_targets(con: sqlite3.Connection, date: str | None = None):
     date = date or _today()
     row = con.execute(
-        """SELECT kcal, protein_g, carb_g, fat_g, effective_date FROM targets
+        """SELECT kcal, protein_g, carb_g, fat_g, fiber_g, effective_date FROM targets
            WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1""",
         (date,),
     ).fetchone()
@@ -156,12 +156,13 @@ def get_targets(con: sqlite3.Connection, date: str | None = None):
 
 
 def set_targets(con: sqlite3.Connection, kcal: float, protein_g: float,
-                carb_g: float, fat_g: float, effective_date: str | None = None) -> dict:
+                carb_g: float, fat_g: float, fiber_g: float | None = None,
+                effective_date: str | None = None) -> dict:
     effective_date = effective_date or _today()
     con.execute(
-        "INSERT INTO targets (effective_date, kcal, protein_g, carb_g, fat_g) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (effective_date, kcal, protein_g, carb_g, fat_g),
+        "INSERT INTO targets (effective_date, kcal, protein_g, carb_g, fat_g, fiber_g) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (effective_date, kcal, protein_g, carb_g, fat_g, fiber_g),
     )
     con.commit()
     return get_targets(con, effective_date)
@@ -173,7 +174,7 @@ def remaining(con: sqlite3.Connection, date: str | None = None) -> dict:
     targets = get_targets(con, date)
     out = {"date": date, "eaten": totals, "targets": targets}
     if targets:
-        out["remaining"] = {k: round(targets[k] - totals[k], 1) for k in MACROS}
+        out["remaining"] = {k: round((targets[k] or 0) - totals[k], 1) for k in MACROS}
     else:
         out["remaining"] = None
         out["note"] = "No targets set — call set_targets first."

@@ -93,13 +93,15 @@ def day_summary(date: str | None = None) -> dict:
 
 @mcp.tool()
 def set_targets(kcal: float, protein_g: float, carb_g: float, fat_g: float,
+                fiber_g: float | None = None,
                 effective_date: str | None = None) -> dict:
     """Set daily macro targets from effective_date (default today) onward.
-    Append-only; the latest row effective on a given date wins, so history
-    stays intact when targets change."""
+    fiber_g is optional (daily fibre goal in grams). Append-only; the latest
+    row effective on a given date wins, so history stays intact when targets
+    change."""
     con = _con()
     try:
-        return tracker.set_targets(con, kcal, protein_g, carb_g, fat_g, effective_date)
+        return tracker.set_targets(con, kcal, protein_g, carb_g, fat_g, fiber_g, effective_date)
     finally:
         con.close()
 

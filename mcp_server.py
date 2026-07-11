@@ -54,7 +54,10 @@ def log_meal(items: list[dict], date: str | None = None,
     Each item is a dict, one of two shapes:
     1. Lookup: {"query": "peanut butter", "qty": 2, "unit": "tbsp"} —
        qty defaults to 1; optional "grams" overrides qty/unit; optional
-       "food_id" skips search (use after the user picks a candidate).
+       "food_id" skips search (use after the user picks a candidate). A unit
+       must be a mass unit (oz/lb/g, converted directly) or one of the food's
+       portions; an unrecognized unit is returned under "problems" with the
+       food's available_portions — re-log with grams or a listed portion.
     2. Manual estimate (unresolvable/restaurant guess): {"name": "shawarma plate",
        "macros": {"kcal": 900, "protein_g": 45, "carb_g": 80, "fat_g": 40}} —
        logged with estimated=1 for later reconciliation.

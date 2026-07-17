@@ -2,11 +2,9 @@
 
 Macro tracking you talk to instead of tap at. A local food database built from
 open data (USDA FoodData Central), exposed as an MCP server so any Claude
-surface — the agent-fleet proxy in #fleet, a local Claude Code session — can
-log meals in plain language and answer the only question that matters:
+surface (a local Claude Code session, or any agent that speaks MCP) can log
+meals in plain language and answer the only question that matters:
 **what's left today**.
-
-Project brief: `Moore HQ Notes/_Inbox/Macro Engine - Project Brief.md` (vault).
 
 ## Setup
 
@@ -23,8 +21,8 @@ Override the DB path with `MACRO_ENGINE_DB`.
 
 ```bash
 claude mcp add macro-engine -- \
-  /home/moore/projects/macro-engine/.venv/bin/python \
-  /home/moore/projects/macro-engine/mcp_server.py
+  /path/to/macro-engine/.venv/bin/python \
+  /path/to/macro-engine/mcp_server.py
 ```
 
 Or in a project `.mcp.json`:
@@ -33,8 +31,8 @@ Or in a project `.mcp.json`:
 {
   "mcpServers": {
     "macro-engine": {
-      "command": "/home/moore/projects/macro-engine/.venv/bin/python",
-      "args": ["/home/moore/projects/macro-engine/mcp_server.py"]
+      "command": "/path/to/macro-engine/.venv/bin/python",
+      "args": ["/path/to/macro-engine/mcp_server.py"]
     }
   }
 }
@@ -67,3 +65,7 @@ teaches the resolver.
 3. Open Food Facts import (Canadian packaged goods), miss-queue → recon
    sourcing, chain-restaurant adapters
 4. Optional UI (standalone PWA or Training Engine feature)
+
+## License
+
+MIT. See [LICENSE](LICENSE).

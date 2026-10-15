@@ -256,6 +256,80 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         _send_json(handler, 200, saved)
         return
 
+    if method == "GET" and path == "/api/chains":
+        with _connect() as con:
+            # 1. Chains imported via ETL scraper (source = 'scrape:<ChainName>')
+            scrape_rows = con.execute(
+                "SELECT DISTINCT source FROM foods WHERE source LIKE 'scrape:%' ORDER BY source"
+            ).fetchall()
+            scrape_chains = [r[0].removeprefix("scrape:") for r in scrape_rows]
+
+            # 2. USDA FDC restaurant chain foods — stored as "CHAINNAME, item name".
+            #    We detect chains by looking for prefixes that look like brand/chain
+            #    names: possessive ('S), multi-word all-caps, or short all-caps
+            #    acronyms (≤5 chars).  Requires ≥5 matching items.
+            import re as _re
+
+            usda_rows = con.execute("""
+                SELECT prefix, COUNT(*) AS cnt
+                FROM (
+                    SELECT SUBSTR(name, 1, INSTR(name, ',') - 1) AS prefix
+                    FROM foods
+                    WHERE source IN ('fdc_sr_legacy', 'fdc_survey')
+                      AND name LIKE '%,%'
+                      AND name GLOB '[A-Z]*'
+                )
+                GROUP BY prefix
+                HAVING cnt >= 5
+                ORDER BY cnt DESC
+            """).fetchall()
+
+            def _looks_like_chain(prefix: str) -> bool:
+                """True if the prefix looks like a restaurant/chain brand name."""
+                # Has possessive: "McDONALD'S", "WENDY'S", "T.G.I. FRIDAY'S"
+                if _re.search(r"'S$", prefix, _re.IGNORECASE):
+                    return True
+                # Multi-word all-caps: "BURGER KING", "TACO BELL", "ON THE BORDER"
+                if prefix == prefix.upper() and " " in prefix:
+                    return True
+                # Short all-caps acronym: "KFC" (≤5 chars)
+                if prefix == prefix.upper() and len(prefix) <= 5:
+                    return True
+                return False
+
+            def _titlecase(s: str) -> str:
+                """Convert ALL-CAPS chain names to a readable display form.
+
+                Handles:
+                - "BURGER KING" → "Burger King"
+                - "McDONALD'S" → "McDonald's"
+                - "T.G.I. FRIDAY'S" → "T.G.I. Friday's"
+                - "KFC" → "KFC" (short all-caps acronyms stay as-is)
+                """
+                if s == s.upper() and len(s) <= 5 and " " not in s:
+                    return s  # Short acronym: keep as-is (KFC, etc.)
+                # Replace runs of 2+ uppercase letters with title-cased version
+                result = _re.sub(r"[A-Z]{2,}", lambda m: m.group(0).capitalize(), s)
+                # Fix possessives: "'S" → "'s"
+                result = _re.sub(r"'S\b", "'s", result)
+                return result
+
+            usda_chains = [
+                _titlecase(r[0]) for r in usda_rows if _looks_like_chain(r[0])
+            ]
+
+        # Merge; scrape: chains take priority, then USDA-detected chains
+        seen: set[str] = set()
+        all_chains: list[str] = []
+        for c in scrape_chains + usda_chains:
+            key = c.casefold()
+            if key not in seen:
+                seen.add(key)
+                all_chains.append(c)
+
+        _send_json(handler, 200, {"chains": all_chains})
+        return
+
     if method == "POST" and path == "/api/fit-meal":
         body = _read_body(handler)
         _missing(body, "restaurant")

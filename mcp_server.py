@@ -8,7 +8,7 @@ or via .mcp.json (see README).
 
 from mcp.server.fastmcp import FastMCP
 
-from macro_engine import db, resolve, tracker
+from macro_engine import db, fit_meal as _fit_meal_mod, resolve, tracker
 
 mcp = FastMCP(
     "macro-engine",
@@ -152,6 +152,50 @@ def delete_log_entry(log_id: int) -> dict:
     con = _con()
     try:
         return {"deleted": tracker.delete_log_entry(con, log_id), "log_id": log_id}
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def fit_meal(restaurant: str, remaining: dict | None = None,
+             date: str | None = None) -> dict:
+    """Find concrete fast-food orders that fit the day's remaining macro budget.
+
+    Given a restaurant or chain name, returns 2-3 ranked orders (single items
+    or small combos of up to 3 items) that land INSIDE the remaining budget,
+    plus a list of popular items that would blow a macro so Ryan knows what to
+    avoid.
+
+    IMPORTANT — portion-aware math: the database stores macros per 100 g.
+    fit_meal scales every item by its actual serving weight before comparing
+    to the budget, so a Big Mac (219 g) contributes ~562 kcal, not the raw
+    257 kcal/100g figure.
+
+    Args:
+        restaurant: Chain name as Ryan says it — "McDonald's", "Tim Hortons",
+                    "Subway", etc. The resolver searches name, brand, and store
+                    columns with FTS, so partial names work.
+        remaining:  Optional explicit override of the remaining macros dict:
+                    {"kcal": 600, "protein_g": 40, "carb_g": 50, "fat_g": 20}.
+                    When null (default), reads today's remaining automatically.
+                    Useful when Ryan says "I have 600 kcal left" without matching
+                    what the tracker currently shows.
+        date:       YYYY-MM-DD — the date whose remaining macros to read when
+                    remaining is null (default today).
+
+    Returns:
+        restaurant  — echoed back
+        budget      — {kcal, protein_g, carb_g, fat_g} used as the ceiling
+        orders      — ranked list of fitting orders, each with:
+                        rank, items (name/portion/grams/macros per item),
+                        total (combined macros), fit_score
+        over_budget — items that alone exceed at least one budget macro, with
+                        which macros they blow — show these as warnings
+        note        — present only when the chain is not in the database
+    """
+    con = _con()
+    try:
+        return _fit_meal_mod.fit_meal(con, restaurant, remaining, date)
     finally:
         con.close()
 

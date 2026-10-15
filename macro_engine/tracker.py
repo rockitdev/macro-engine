@@ -1,4 +1,4 @@
-"""Logging, targets, and the headline question: what's left today.
+"""Logging, targets, and what's left: today, and the seven-day bank.
 
 All quantities resolve to grams, macros scale from per-100g values, and every
 log row carries denormalized macros so history survives food-table changes.
@@ -11,6 +11,23 @@ import sqlite3
 from . import resolve
 
 MACROS = ("kcal", "protein_g", "carb_g", "fat_g", "fiber_g")
+# Carbs, fat, and the calories they represent can be saved and spent later in
+# the same week. Protein is a weekly total. Fiber is not part of the bank.
+BANK = ("kcal", "carb_g", "fat_g")
+# date.weekday() order. The stored preference is the full name. Monday is the
+# default when settings has no week_starts_on row.
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_WEEKDAY_ALIASES = {
+    "mon": "monday", "monday": "monday",
+    "tue": "tuesday", "tues": "tuesday", "tuesday": "tuesday",
+    "wed": "wednesday", "wednesday": "wednesday",
+    "thu": "thursday", "thur": "thursday", "thurs": "thursday", "thursday": "thursday",
+    "fri": "friday", "friday": "friday",
+    "sat": "saturday", "saturday": "saturday",
+    "sun": "sunday", "sunday": "sunday",
+}
+MEALS = ("breakfast", "lunch", "dinner", "snacks")
+_MEAL_ALIASES = {"snack": "snacks"}
 
 UNIT_SYNONYMS = {
     "tbsp": "tablespoon", "tbs": "tablespoon", "tablespoons": "tablespoon",
@@ -136,7 +153,21 @@ def _resolve_grams(con: sqlite3.Connection, food: dict, item: dict, alias_grams=
     return qty * 100.0, f"{qty * 100:g} g (no portion data)"
 
 
-def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | None) -> dict:
+def _meal(value) -> str | None:
+    """Normalize a meal name. None and '' mean no meal. Anything else must be
+    breakfast, lunch, dinner, or snacks ('snack' is accepted)."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("meal must be breakfast, lunch, dinner, or snacks")
+    meal = _MEAL_ALIASES.get(value.strip().lower(), value.strip().lower())
+    if meal not in MEALS:
+        raise ValueError("meal must be breakfast, lunch, dinner, or snacks")
+    return meal
+
+
+def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | None,
+              meal: str | None = None) -> dict:
     """Process one meal item into {'logged': entry} or {'problem': info}.
 
     Raises ValueError (incl. UnresolvedUnit) for invalid input so the caller can
@@ -151,13 +182,13 @@ def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | No
         grams = _num(item.get("grams"), "grams", allow_none=True, positive=True)
         cur = con.execute(
             """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
-                                carb_g, fat_g, fiber_g, raw_text, estimated)
-               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                                carb_g, fat_g, fiber_g, raw_text, estimated, meal)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (date, name, grams, vals["kcal"], vals["protein_g"], vals["carb_g"],
-             vals["fat_g"], vals["fiber_g"], raw_text or name),
+             vals["fat_g"], vals["fiber_g"], raw_text or name, meal),
         )
         return {"logged": {"log_id": cur.lastrowid, "name": name,
-                           "estimated": True, **vals}}
+                           "estimated": True, "meal": meal, **vals}}
 
     food, alias_grams, candidates = None, None, []
     if item.get("food_id"):
@@ -184,22 +215,22 @@ def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | No
     vals = {k: round((food.get(k) or 0) * scale, 1) for k in MACROS}
     cur = con.execute(
         """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
-                            carb_g, fat_g, fiber_g, raw_text, estimated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                            carb_g, fat_g, fiber_g, raw_text, estimated, meal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
         (date, food["id"], qty_desc, grams, vals["kcal"], vals["protein_g"],
          vals["carb_g"], vals["fat_g"], vals["fiber_g"],
-         raw_text or item.get("query")),
+         raw_text or item.get("query"), meal),
     )
     return {"logged": {
         "log_id": cur.lastrowid, "food_id": food["id"], "name": food["name"],
         "matched_alias": bool(food.get("matched_alias")), "qty": qty_desc,
-        "grams": round(grams, 1), "estimated": False, **vals,
+        "grams": round(grams, 1), "estimated": False, "meal": meal, **vals,
         "runner_up": candidates[1]["name"] if len(candidates) > 1 else None,
     }}
 
 
 def log_meal(con: sqlite3.Connection, items: list[dict], date: str | None = None,
-             raw_text: str | None = None) -> dict:
+             raw_text: str | None = None, meal: str | None = None) -> dict:
     """Log a list of items. Each item is either:
       - a food lookup: {"query": str, "qty": 2, "unit": "slice", "grams": 40,
                         "food_id": 123}  (query required unless food_id given;
@@ -208,10 +239,13 @@ def log_meal(con: sqlite3.Connection, items: list[dict], date: str | None = None
                         portions, else the item is flagged under 'problems'.
       - a manual estimate: {"name": str, "macros": {"kcal":..., "protein_g":...,
                         "carb_g":..., "fat_g":..., "fiber_g":...}} -> estimated=1
+    meal applies to every item: breakfast, lunch, dinner, or snacks. An item
+    may set its own "meal" to override that. Omit both to leave the row unset.
     Returns per-item resolutions plus the day's remaining macros. Items with
     invalid values are surfaced under 'problems', never silently logged.
     """
     date = _valid_date(date) if date else _today()
+    meal = _meal(meal)
     logged, problems = [], []
 
     for item in items:
@@ -219,7 +253,8 @@ def log_meal(con: sqlite3.Connection, items: list[dict], date: str | None = None
             problems.append({"item": item, "reason": "item must be an object"})
             continue
         try:
-            result = _log_item(con, item, date, raw_text)
+            item_meal = _meal(item["meal"]) if "meal" in item else meal
+            result = _log_item(con, item, date, raw_text, item_meal)
         except UnresolvedUnit as e:
             problems.append({"item": item, "reason": str(e),
                              "available_portions": [p["label"] for p in e.portions]})
@@ -295,17 +330,249 @@ def remaining(con: sqlite3.Connection, date: str | None = None) -> dict:
     return out
 
 
+def _weekday_name(value) -> str:
+    if not isinstance(value, str):
+        raise ValueError("week starts on a weekday, Sunday through Saturday")
+    name = _WEEKDAY_ALIASES.get(value.strip().lower())
+    if not name:
+        raise ValueError("week starts on a weekday, Sunday through Saturday")
+    return name
+
+
+def get_week_start(con: sqlite3.Connection) -> str:
+    """Weekday a week begins on. Monday when the preference has never been set."""
+    row = con.execute(
+        "SELECT value FROM settings WHERE key = 'week_starts_on'"
+    ).fetchone()
+    if row is None:
+        return "monday"
+    return _weekday_name(row["value"])
+
+
+def set_week_start(con: sqlite3.Connection, day: str) -> dict:
+    """Remember which weekday begins a week. Past weeks regroup; log rows stay put."""
+    name = _weekday_name(day)
+    con.execute(
+        "INSERT INTO settings (key, value) VALUES ('week_starts_on', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (name,),
+    )
+    con.commit()
+    return {"week_starts_on": name}
+
+
+def _day_sums(con: sqlite3.Connection, date: str) -> dict:
+    """Unrounded totals for one date. Week math rounds once, at the end."""
+    row = con.execute(
+        """SELECT COUNT(*) AS entries, COALESCE(SUM(kcal),0) AS kcal,
+                  COALESCE(SUM(protein_g),0) AS protein_g,
+                  COALESCE(SUM(carb_g),0) AS carb_g,
+                  COALESCE(SUM(fat_g),0) AS fat_g,
+                  COALESCE(SUM(fiber_g),0) AS fiber_g
+           FROM log WHERE date = ?""",
+        (date,),
+    ).fetchone()
+    return {"entries": row["entries"], **{k: float(row[k]) for k in MACROS}}
+
+
+def week_summary(con: sqlite3.Connection, date: str | None = None, *,
+                 today: str | None = None) -> dict:
+    """Seven-day week containing ``date`` (default today).
+
+    The week runs from ``week_starts_on`` (Monday unless changed) through the
+    day before the next one. ``start`` and ``end`` are inclusive.
+
+    ``saved`` is kcal, carb_g, and fat_g left unused on earlier days of this
+    week that already had a target. Today is excluded because the day is not
+    finished. Positive is under target, negative is over. None when today
+    falls outside the week, or when no earlier day had a target.
+
+    ``room_today`` is how much of those three can still be eaten today while
+    later days stay on their own targets: today's remaining plus ``saved``.
+    None when today is outside the week or today has no target.
+
+    Protein and fiber are not banked. ``week`` sums the whole week. A day
+    with no target adds its food to ``week.eaten`` and does not add a target.
+    ``today`` overrides the clock for tests; callers leave it unset.
+    """
+    focus = _valid_date(date) if date else _today()
+    today_s = _valid_date(today) if today else _today()
+    focus_d = _dt.date.fromisoformat(focus)
+    today_d = _dt.date.fromisoformat(today_s)
+    starts_on = get_week_start(con)
+    # Days back from the focused date to the most recent week-start weekday.
+    delta = (focus_d.weekday() - WEEKDAYS.index(starts_on)) % 7
+    start = focus_d - _dt.timedelta(days=delta)
+    end = start + _dt.timedelta(days=6)
+    in_week = start <= today_d <= end
+
+    days = []
+    eaten_raw = {k: 0.0 for k in MACROS}
+    target_raw = {k: 0.0 for k in MACROS}
+    has_target = {k: False for k in MACROS}
+    saved_raw = {k: 0.0 for k in BANK}
+    saved_days = 0
+    today_targets = None
+    today_raw = None
+
+    for offset in range(7):
+        day = start + _dt.timedelta(days=offset)
+        day_s = day.isoformat()
+        raw = _day_sums(con, day_s)
+        targets = get_targets(con, day_s)
+        shown = {"entries": raw["entries"], **{k: round(raw[k], 1) for k in MACROS}}
+        for key in MACROS:
+            eaten_raw[key] += raw[key]
+        under = None
+        if targets:
+            under = {}
+            for key in MACROS:
+                goal = targets[key]
+                if goal is None:
+                    under[key] = None
+                    continue
+                has_target[key] = True
+                target_raw[key] += float(goal)
+                under[key] = round(float(goal) - shown[key], 1)
+            if in_week and day < today_d:
+                saved_days += 1
+                for key in BANK:
+                    saved_raw[key] += float(targets[key]) - raw[key]
+        if day == today_d:
+            today_targets = targets
+            today_raw = raw
+        days.append({"date": day_s, "eaten": shown, "targets": targets, "under": under})
+
+    saved = None
+    if in_week and saved_days:
+        saved = {k: round(saved_raw[k], 1) for k in BANK}
+
+    room = None
+    if in_week and today_targets is not None and today_raw is not None:
+        extra = saved_raw if saved_days else {k: 0.0 for k in BANK}
+        room = {
+            k: round(float(today_targets[k]) - today_raw[k] + extra[k], 1)
+            for k in BANK
+        }
+
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "week_starts_on": starts_on,
+        "focus": focus,
+        "today": today_s,
+        "days": days,
+        "saved": saved,
+        "room_today": room,
+        "week": {
+            "target": {k: (round(target_raw[k], 1) if has_target[k] else None) for k in MACROS},
+            "eaten": {k: round(eaten_raw[k], 1) for k in MACROS},
+            "left": {
+                k: (round(target_raw[k] - eaten_raw[k], 1) if has_target[k] else None)
+                for k in MACROS
+            },
+        },
+    }
+
+
+def _sum_shown_days(days: list[dict]) -> dict:
+    """Add up day rows the week summary already rounded, so a month matches its days."""
+    eaten = {k: 0.0 for k in MACROS}
+    target = {k: 0.0 for k in MACROS}
+    has_target = {k: False for k in MACROS}
+    for day in days:
+        for key in MACROS:
+            eaten[key] += day["eaten"][key]
+        if not day["targets"]:
+            continue
+        for key in MACROS:
+            goal = day["targets"][key]
+            if goal is None:
+                continue
+            has_target[key] = True
+            target[key] += float(goal)
+    return {
+        "target": {k: (round(target[k], 1) if has_target[k] else None) for k in MACROS},
+        "eaten": {k: round(eaten[k], 1) for k in MACROS},
+        "left": {
+            k: (round(target[k] - eaten[k], 1) if has_target[k] else None) for k in MACROS
+        },
+    }
+
+
+def month_summary(con: sqlite3.Connection, date: str | None = None, *,
+                  today: str | None = None) -> dict:
+    """Calendar month containing ``date``, grouped into the user's weeks.
+
+    Weeks that spill into the previous or next month are included whole, so
+    each week's bank still has seven days. ``month`` sums only days inside
+    the calendar month. ``finished`` sums those days before today. ``through_today``
+    includes today. Both are null when the month has not started.
+    """
+    focus = _valid_date(date) if date else _today()
+    today_s = _valid_date(today) if today else _today()
+    focus_d = _dt.date.fromisoformat(focus)
+    first = focus_d.replace(day=1)
+    nxt = (first.replace(day=28) + _dt.timedelta(days=4)).replace(day=1)
+    last = nxt - _dt.timedelta(days=1)
+    first_s, last_s = first.isoformat(), last.isoformat()
+
+    weeks = []
+    cursor = first
+    for _ in range(6):
+        summary = week_summary(con, cursor.isoformat(), today=today_s)
+        weeks.append(summary)
+        if summary["end"] >= last_s:
+            break
+        cursor = _dt.date.fromisoformat(summary["end"]) + _dt.timedelta(days=1)
+
+    in_month = [
+        day for week in weeks for day in week["days"] if first_s <= day["date"] <= last_s
+    ]
+    if today_s < first_s:
+        finished_days: list[dict] = []
+        through_days: list[dict] = []
+    elif today_s > last_s:
+        finished_days = in_month
+        through_days = in_month
+    else:
+        finished_days = [day for day in in_month if day["date"] < today_s]
+        through_days = [day for day in in_month if day["date"] <= today_s]
+
+    return {
+        "start": first_s,
+        "end": last_s,
+        "focus": focus,
+        "today": today_s,
+        "week_starts_on": get_week_start(con),
+        "weeks": weeks,
+        "month": _sum_shown_days(in_month),
+        "finished": _sum_shown_days(finished_days) if finished_days else None,
+        "through_today": _sum_shown_days(through_days) if through_days else None,
+    }
+
+
 def day_log(con: sqlite3.Connection, date: str | None = None) -> list[dict]:
     date = date or _today()
     rows = con.execute(
         """SELECT l.id AS log_id, l.ts, l.food_id, l.qty_desc, l.grams, l.kcal,
-                  l.protein_g, l.carb_g, l.fat_g, l.fiber_g, l.estimated,
+                  l.protein_g, l.carb_g, l.fat_g, l.fiber_g, l.estimated, l.meal,
                   COALESCE(f.name, l.qty_desc) AS name
            FROM log l LEFT JOIN foods f ON f.id = l.food_id
            WHERE l.date = ? ORDER BY l.id""",
         (date,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_log_meal(con: sqlite3.Connection, log_id: int, meal: str | None) -> dict | None:
+    """Set or clear the meal on one log row. Returns None when the id is missing."""
+    stored = _meal(meal)
+    cur = con.execute("UPDATE log SET meal = ? WHERE id = ?", (stored, int(log_id)))
+    con.commit()
+    if cur.rowcount == 0:
+        return None
+    return {"log_id": int(log_id), "meal": stored}
 
 
 def delete_log_entry(con: sqlite3.Connection, log_id: int) -> bool:

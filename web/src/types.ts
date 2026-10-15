@@ -188,8 +188,11 @@ export type FitOverBudgetItem = {
 export type FitMealResult = {
   restaurant: string
   budget: FitMacroBudget
+  per_meal_target: FitMacroBudget
+  meals_left: number
   orders: FitOrder[]
   over_budget: FitOverBudgetItem[]
+  treats_excluded: boolean
   note?: string
 }
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import db, fit_meal as _fit_meal_mod, resolve, tracker
+from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_STATIC = ROOT / "web" / "dist"
@@ -145,12 +146,30 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
             _send_json(handler, 200, tracker.month_summary(con, _query_date(qs)))
         return
 
+    if method == "GET" and path == "/api/settings":
+        with _connect() as con:
+            week_starts_on = tracker.get_week_start(con)
+            meals_per_day = _get_meals_per_day(con)
+        _send_json(handler, 200, {
+            "week_starts_on": week_starts_on,
+            "meals_per_day": meals_per_day,
+        })
+        return
+
     if method == "POST" and path == "/api/settings":
         body = _read_body(handler)
-        if "week_starts_on" not in body:
-            raise ValueError("missing week_starts_on")
+        result: dict = {}
         with _connect() as con:
-            _send_json(handler, 200, tracker.set_week_start(con, body["week_starts_on"]))
+            if "week_starts_on" in body:
+                result.update(tracker.set_week_start(con, body["week_starts_on"]))
+            if "meals_per_day" in body:
+                n = body["meals_per_day"]
+                if not isinstance(n, int) or isinstance(n, bool):
+                    raise ValueError("meals_per_day must be an integer")
+                result.update(_set_meals_per_day(con, n))
+        if not result:
+            raise ValueError("provide at least one setting: week_starts_on or meals_per_day")
+        _send_json(handler, 200, result)
         return
 
     if method == "POST" and path == "/api/meals":
@@ -342,8 +361,23 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         date = body.get("date")
         if date is not None:
             date = tracker._valid_date(date)
+        # meals_per_day / meals_left overrides
+        mpd = body.get("meals_per_day")
+        if mpd is not None:
+            if not isinstance(mpd, int) or isinstance(mpd, bool) or mpd < 1:
+                raise ValueError("meals_per_day must be a positive integer")
+        ml = body.get("meals_left")
+        if ml is not None:
+            if not isinstance(ml, int) or isinstance(ml, bool) or ml < 1:
+                raise ValueError("meals_left must be a positive integer")
+        include_treats = bool(body.get("include_treats", False))
         with _connect() as con:
-            _send_json(handler, 200, _fit_meal_mod.fit_meal(con, restaurant, override, date))
+            _send_json(handler, 200, _fit_meal_mod.fit_meal(
+                con, restaurant, override, date,
+                meals_per_day=mpd,
+                meals_left_override=ml,
+                include_treats=include_treats,
+            ))
         return
 
     if method == "GET" and not path.startswith("/api"):

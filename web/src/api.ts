@@ -49,10 +49,21 @@ export function getMonth(date: string) {
   return request<Month>(`/api/month?date=${encodeURIComponent(date)}`)
 }
 
+export function getSettings() {
+  return request<{ week_starts_on: string; meals_per_day: number }>("/api/settings")
+}
+
 export function setWeekStart(day: string) {
   return request<{ week_starts_on: string }>("/api/settings", {
     method: "POST",
     body: JSON.stringify({ week_starts_on: day }),
+  })
+}
+
+export function setMealsPerDay(n: number) {
+  return request<{ meals_per_day: number }>("/api/settings", {
+    method: "POST",
+    body: JSON.stringify({ meals_per_day: n }),
   })
 }
 
@@ -128,6 +139,9 @@ export function fitMeal(body: {
   restaurant: string
   remaining?: FitMacroBudget | null
   date?: string
+  meals_per_day?: number | null
+  meals_left?: number | null
+  include_treats?: boolean
 }) {
   return request<FitMealResult>("/api/fit-meal", {
     method: "POST",

@@ -1,10 +1,13 @@
 """Tests for macro_engine.fit_meal — combinatorial restaurant order solver.
 
-Key correctness: ALL macros stored in food_nutrients are PER 100 g. The solver
-MUST scale by (portion_grams / 100) before comparing to budget. The per-100g
-trap tests below verify this explicitly — a solver that forgets to scale will
-return wrong results (it would approve orders that actually blow the budget, or
-reject orders that actually fit).
+Key correctness invariants:
+1. ALL macros stored in food_nutrients are PER 100 g. The solver MUST scale by
+   (portion_grams / 100) before comparing to the budget.
+2. The solver targets a PER-MEAL slice (remaining / meals_left) — not the full
+   day's budget.  Orders must not exceed the full remaining (hard ceiling).
+3. Treats (desserts, shakes) are excluded by default; include_treats=True brings
+   them back.
+4. Ranking is by proximity to the per-meal target (protein-forward tiebreak).
 """
 
 import sys
@@ -62,12 +65,49 @@ def _seed_chain(con, *, chain: str = "FakeBurger") -> dict[str, int]:
     return ids
 
 
+def _seed_treat_chain(con, *, chain: str = "SweetSpot") -> dict[str, int]:
+    """Insert a mix of regular and treat items."""
+    foods = [
+        # (name,        kcal/100g, prot/100g, carb/100g, fat/100g, portion_label, grams)
+        ("Grilled Chicken",  150.0, 30.0,  2.0,  3.0, "1 piece",  180.0),
+        ("Caesar Wrap",      200.0, 18.0, 20.0,  8.0, "1 wrap",   220.0),
+        # Treat items — must match _TREAT_KEYWORDS
+        ("Chocolate Milkshake", 130.0, 4.0, 22.0, 5.0, "medium", 400.0),
+        ("Vanilla McFlurry",     140.0, 3.5, 23.0, 4.5, "regular", 250.0),
+        ("Soft Serve Sundae",     80.0, 2.0, 15.0, 2.0, "small",  150.0),
+    ]
+    ids: dict[str, int] = {}
+    for name, kcal, prot, carb, fat, plabel, pgrams in foods:
+        fid = con.execute(
+            "INSERT INTO foods (name, brand, source) VALUES (?, ?, 'manual') RETURNING id",
+            (name, chain),
+        ).fetchone()[0]
+        con.execute(
+            "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (fid, kcal, prot, carb, fat),
+        )
+        con.execute(
+            "INSERT INTO portions (food_id, label, grams) VALUES (?, ?, ?)",
+            (fid, plabel, pgrams),
+        )
+        ids[name] = fid
+    db.rebuild_fts(con)
+    con.commit()
+    return ids
+
+
 # ---------------------------------------------------------------------------
-# Tests
+# Per-100g scaling tests (must still pass — the scaling logic is unchanged)
 # ---------------------------------------------------------------------------
 
 class FitMealScalingTest(unittest.TestCase):
-    """Verify that per-100g → per-serving scaling is applied correctly."""
+    """Verify that per-100g → per-serving scaling is applied correctly.
+
+    The hard ceiling is the full remaining budget passed in.  meals_left_override=1
+    is used to make the per-meal target == the ceiling, so these tests match the
+    original 'fill the whole budget' behaviour while still being valid scaling tests.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -81,40 +121,43 @@ class FitMealScalingTest(unittest.TestCase):
     def test_per_100g_trap_burger_kcal(self):
         """Classic Patty stores 257 kcal/100g; serving is 219g → ~562 kcal.
 
-        A budget of 600 kcal should fit it (562 ≤ 600).
-        A budget of 300 kcal should NOT fit it (562 > 300).
+        A ceiling of 600 kcal should fit it (562 ≤ 600).
+        A ceiling of 300 kcal should NOT fit it (562 > 300).
         A broken solver that forgets to scale would see 257 < 300 and
-        incorrectly approve the patty for the 300-kcal budget.
+        incorrectly approve the patty for the 300-kcal ceiling.
         """
         budget_fits = {"kcal": 600.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 50.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget_fits)
+        # meals_left_override=1 makes target == ceiling; confirms ceiling enforcement
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget_fits,
+                                 meals_left_override=1)
         patty_fits = any(
             any("Classic Patty" == it["name"] for it in order["items"])
             for order in result["orders"]
         )
         self.assertTrue(patty_fits,
-                        "Classic Patty (~562 kcal) should fit in a 600 kcal budget")
+                        "Classic Patty (~562 kcal) should fit in a 600 kcal ceiling")
 
         budget_too_tight = {"kcal": 300.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 50.0}
-        result2 = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget_too_tight)
+        result2 = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget_too_tight,
+                                  meals_left_override=1)
         patty_in_tight = any(
             any("Classic Patty" == it["name"] for it in order["items"])
             for order in result2["orders"]
         )
         self.assertFalse(patty_in_tight,
-                         "Classic Patty (~562 kcal) must NOT fit in a 300 kcal budget — "
+                         "Classic Patty (~562 kcal) must NOT fit in a 300 kcal ceiling — "
                          "solver must scale by portion grams, not use raw per-100g value")
 
     def test_per_100g_trap_diet_cola_fits_any_budget(self):
         """Zero Cola: 0 kcal/100g, 500g portion → 0 kcal.
-        It should fit any budget (including very tight ones)."""
+        It should fit any ceiling (including very tight ones)."""
         budget = {"kcal": 1.0, "protein_g": 1.0, "carb_g": 1.0, "fat_g": 1.0}
         result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
         cola_fits = any(
             any("Zero Cola" == it["name"] for it in order["items"])
             for order in result["orders"]
         )
-        self.assertTrue(cola_fits, "Zero Cola (0 kcal per serving) should fit any budget")
+        self.assertTrue(cola_fits, "Zero Cola (0 kcal per serving) should fit any ceiling")
 
     def test_item_macros_use_portion_grams(self):
         """Verify that Classic Patty in orders carries properly scaled macros.
@@ -123,7 +166,8 @@ class FitMealScalingTest(unittest.TestCase):
         The item's macros dict must show ~562.8, not 257.
         """
         budget = {"kcal": 700.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 60.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
         found_patty = False
         for order in result["orders"]:
             for item in order["items"]:
@@ -133,23 +177,26 @@ class FitMealScalingTest(unittest.TestCase):
                     self.assertAlmostEqual(item["macros"]["kcal"], 562.8, delta=1.0,
                                           msg="Classic Patty kcal must be scaled to portion (219g), not raw per-100g")
         if not found_patty:
-            # Classic Patty (562 kcal) fits a 700 kcal budget — if not found, solver is broken
-            self.fail("Classic Patty should appear in at least one order for a 700 kcal budget")
+            self.fail("Classic Patty should appear in at least one order for a 700 kcal ceiling")
 
     def test_over_budget_flags_double(self):
         """Double Stack (380 kcal/100g × 310g = 1178 kcal) must appear in
-        over_budget when the budget is tight, and must NOT appear in orders."""
+        over_budget when the ceiling is tight, and must NOT appear in orders."""
         budget = {"kcal": 400.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 50.0}
         result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
         over_names = [item["name"] for item in result["over_budget"]]
         self.assertIn("Double Stack", over_names,
-                      "Double Stack should be flagged over_budget when kcal budget is tight")
+                      "Double Stack should be flagged over_budget when kcal ceiling is tight")
         # And it must NOT appear in orders
         for order in result["orders"]:
             for it in order["items"]:
                 self.assertNotEqual(it["name"], "Double Stack",
                                     "Over-budget item must not appear in orders")
 
+
+# ---------------------------------------------------------------------------
+# Solver correctness tests
+# ---------------------------------------------------------------------------
 
 class FitMealSolverTest(unittest.TestCase):
     """Solver correctness: combos, ranking, edge cases."""
@@ -165,53 +212,58 @@ class FitMealSolverTest(unittest.TestCase):
 
     def test_returns_up_to_three_orders(self):
         budget = {"kcal": 1000.0, "protein_g": 100.0, "carb_g": 200.0, "fat_g": 80.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
         self.assertLessEqual(len(result["orders"]), 3)
         self.assertGreater(len(result["orders"]), 0,
                            "Should find at least one fitting order")
 
     def test_orders_ranked_by_score(self):
         budget = {"kcal": 1000.0, "protein_g": 100.0, "carb_g": 200.0, "fat_g": 80.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
         scores = [o["fit_score"] for o in result["orders"]]
         self.assertEqual(scores, sorted(scores, reverse=True),
                          "Orders must be sorted descending by fit_score")
 
     def test_order_ranks_are_sequential(self):
         budget = {"kcal": 1000.0, "protein_g": 100.0, "carb_g": 200.0, "fat_g": 80.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
         for i, order in enumerate(result["orders"], 1):
             self.assertEqual(order["rank"], i)
 
     def test_combo_totals_match_item_sum(self):
         """Total macros on each order must equal the sum of its items' macros."""
         budget = {"kcal": 1000.0, "protein_g": 100.0, "carb_g": 200.0, "fat_g": 80.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
         for order in result["orders"]:
             for macro in ("kcal", "protein_g", "carb_g", "fat_g"):
                 expected = round(sum(it["macros"][macro] for it in order["items"]), 1)
                 self.assertAlmostEqual(order["total"][macro], expected, delta=0.2,
                                        msg=f"Order total.{macro} doesn't match item sum")
 
-    def test_no_order_exceeds_budget(self):
-        """Every returned order must be within budget on all macros."""
+    def test_no_order_exceeds_ceiling(self):
+        """Every returned order must be within the hard ceiling on all macros."""
         budget = {"kcal": 700.0, "protein_g": 50.0, "carb_g": 80.0, "fat_g": 35.0}
-        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=3)
         for order in result["orders"]:
             for macro in ("kcal", "protein_g", "carb_g", "fat_g"):
                 b = budget[macro]
                 self.assertLessEqual(
                     order["total"][macro], b + 0.1,
-                    msg=f"Order rank {order['rank']} exceeds {macro} budget ({b}g)",
+                    msg=f"Order rank {order['rank']} exceeds {macro} ceiling ({b})",
                 )
 
     def test_zero_budget_yields_no_orders(self):
-        """A zero calorie budget means nothing fits except zero-kcal items."""
+        """A zero calorie ceiling means nothing fits except zero-kcal items."""
         budget = {"kcal": 0.0, "protein_g": 0.0, "carb_g": 0.0, "fat_g": 0.0}
         result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget)
         for order in result["orders"]:
             self.assertEqual(order["total"]["kcal"], 0.0,
-                             "Only zero-kcal items should fit a zero-kcal budget")
+                             "Only zero-kcal items should fit a zero-kcal ceiling")
 
     def test_unknown_chain_returns_note(self):
         result = fm_mod.fit_meal(self.con, "ChainThatDoesntExist123")
@@ -231,6 +283,213 @@ class FitMealSolverTest(unittest.TestCase):
         result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=None, date="2026-01-01")
         self.assertEqual(result["budget"]["kcal"], 2000.0)
 
+    def test_result_has_new_fields(self):
+        """Result dict must include per_meal_target, meals_left, treats_excluded."""
+        budget = {"kcal": 900.0, "protein_g": 75.0, "carb_g": 100.0, "fat_g": 30.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=3)
+        self.assertIn("per_meal_target", result)
+        self.assertIn("meals_left", result)
+        self.assertIn("treats_excluded", result)
+        self.assertEqual(result["meals_left"], 3)
+        self.assertTrue(result["treats_excluded"])  # default: treats excluded
+
+
+# ---------------------------------------------------------------------------
+# Per-meal targeting tests (new 2026-10-15)
+# ---------------------------------------------------------------------------
+
+class FitMealPerMealTargetTest(unittest.TestCase):
+    """Verify the per-meal division and hard-ceiling guard."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        self.ids = _seed_chain(self.con)
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def test_per_meal_target_is_ceiling_divided_by_meals_left(self):
+        """per_meal_target must equal ceiling / meals_left for each macro."""
+        budget = {"kcal": 900.0, "protein_g": 90.0, "carb_g": 120.0, "fat_g": 30.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=3)
+        self.assertEqual(result["meals_left"], 3)
+        target = result["per_meal_target"]
+        self.assertAlmostEqual(target["kcal"], 300.0, delta=0.5,
+                               msg="per_meal_target.kcal = 900 / 3 = 300")
+        self.assertAlmostEqual(target["protein_g"], 30.0, delta=0.5,
+                               msg="per_meal_target.protein_g = 90 / 3 = 30")
+        self.assertAlmostEqual(target["carb_g"], 40.0, delta=0.5,
+                               msg="per_meal_target.carb_g = 120 / 3 = 40")
+        self.assertAlmostEqual(target["fat_g"], 10.0, delta=0.5,
+                               msg="per_meal_target.fat_g = 30 / 3 = 10")
+
+    def test_meals_left_one_target_equals_ceiling(self):
+        """With meals_left=1, per-meal target == ceiling (whole remaining for one meal)."""
+        budget = {"kcal": 600.0, "protein_g": 50.0, "carb_g": 70.0, "fat_g": 20.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
+        self.assertEqual(result["meals_left"], 1)
+        target = result["per_meal_target"]
+        self.assertAlmostEqual(target["kcal"], 600.0, delta=0.5)
+        self.assertAlmostEqual(target["protein_g"], 50.0, delta=0.5)
+
+    def test_hard_ceiling_never_exceeded(self):
+        """Orders must NEVER exceed the ceiling even when the per-meal target is larger.
+
+        Scenario: large ceiling (3000 kcal), 1 meal left → target = 3000 kcal.
+        Classic Patty (562 kcal) should fit under the 3000 kcal ceiling.
+        Double Stack (1178 kcal) also fits under 3000 kcal.
+        Neither should appear in any order that totals > 3000 kcal.
+        """
+        budget = {"kcal": 3000.0, "protein_g": 240.0, "carb_g": 300.0, "fat_g": 93.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=1)
+        for order in result["orders"]:
+            self.assertLessEqual(order["total"]["kcal"], 3000.0 + 0.1,
+                                 "No order should exceed the kcal ceiling")
+            self.assertLessEqual(order["total"]["protein_g"], 240.0 + 0.1)
+            self.assertLessEqual(order["total"]["carb_g"], 300.0 + 0.1)
+            self.assertLessEqual(order["total"]["fat_g"], 93.0 + 0.1)
+
+    def test_hard_ceiling_applied_with_multiple_meals_left(self):
+        """With meals_left=3 and a tight ceiling, orders must not exceed ceiling.
+
+        This is the key regression test for the original bug: the solver was
+        targeting the full day's budget (ceiling) rather than a per-meal slice.
+        With meals_left=3 and kcal=600, the per-meal target = 200 kcal; orders
+        may still find items up to 600 kcal (the ceiling), but they are scored
+        by proximity to 200 kcal.  Either way, they must not exceed 600 kcal.
+        """
+        budget = {"kcal": 600.0, "protein_g": 60.0, "carb_g": 80.0, "fat_g": 25.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 meals_left_override=3)
+        # Verify the target is 1/3 of the ceiling
+        self.assertAlmostEqual(result["per_meal_target"]["kcal"], 200.0, delta=0.5)
+        # Verify no order exceeds the hard ceiling
+        for order in result["orders"]:
+            self.assertLessEqual(order["total"]["kcal"], 600.0 + 0.1,
+                                 "Orders must not exceed the hard ceiling even with target < ceiling")
+
+    def test_meals_per_day_setting_persisted(self):
+        """set_meals_per_day persists and get_meals_per_day reads it back."""
+        fm_mod.set_meals_per_day(self.con, 4)
+        self.assertEqual(fm_mod.get_meals_per_day(self.con), 4)
+        fm_mod.set_meals_per_day(self.con, 2)
+        self.assertEqual(fm_mod.get_meals_per_day(self.con), 2)
+
+    def test_meals_per_day_default_is_three(self):
+        """Default meals_per_day is 3 when no setting has been stored."""
+        self.assertEqual(fm_mod.get_meals_per_day(self.con), 3)
+
+    def test_meals_per_day_used_when_no_override(self):
+        """meals_per_day setting is used when meals_left_override is not passed."""
+        fm_mod.set_meals_per_day(self.con, 2)
+        budget = {"kcal": 1000.0, "protein_g": 100.0, "carb_g": 120.0, "fat_g": 40.0}
+        result = fm_mod.fit_meal(self.con, "FakeBurger", remaining=budget,
+                                 date="2026-01-01")
+        # With nothing logged, meals_logged = 0, so meals_left = max(1, 2 - 0) = 2
+        self.assertEqual(result["meals_left"], 2)
+        self.assertAlmostEqual(result["per_meal_target"]["kcal"], 500.0, delta=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Treats filter tests (new 2026-10-15)
+# ---------------------------------------------------------------------------
+
+class FitMealTreatsFilterTest(unittest.TestCase):
+    """Treats (desserts, shakes) are excluded by default; include_treats brings them back."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        self.ids = _seed_treat_chain(self.con)
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    TREAT_NAMES = {"Chocolate Milkshake", "Vanilla McFlurry", "Soft Serve Sundae"}
+    REGULAR_NAMES = {"Grilled Chicken", "Caesar Wrap"}
+
+    def _item_names_in_orders(self, result: dict) -> set:
+        names = set()
+        for order in result["orders"]:
+            for item in order["items"]:
+                names.add(item["name"])
+        return names
+
+    def test_treats_excluded_by_default(self):
+        """Default call must not suggest any treat items in orders."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 250.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "SweetSpot", remaining=budget,
+                                 meals_left_override=1)
+        names = self._item_names_in_orders(result)
+        for treat in self.TREAT_NAMES:
+            self.assertNotIn(treat, names,
+                             f"Treat item '{treat}' must be excluded from orders by default")
+
+    def test_treats_excluded_flag_set_by_default(self):
+        """treats_excluded field is True when include_treats=False (default)."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 250.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "SweetSpot", remaining=budget)
+        self.assertTrue(result["treats_excluded"])
+
+    def test_include_treats_flag_false_when_opted_in(self):
+        """treats_excluded field is False when include_treats=True."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 250.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "SweetSpot", remaining=budget,
+                                 include_treats=True)
+        self.assertFalse(result["treats_excluded"])
+
+    def test_treats_included_when_opted_in(self):
+        """With include_treats=True, treat items appear in suggestions."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 250.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "SweetSpot", remaining=budget,
+                                 include_treats=True, meals_left_override=1)
+        names = self._item_names_in_orders(result)
+        # At least one treat must appear when inclusion is enabled
+        found_treat = bool(names & self.TREAT_NAMES)
+        self.assertTrue(found_treat,
+                        "At least one treat item should appear when include_treats=True")
+
+    def test_regular_items_always_present(self):
+        """Non-treat items always appear regardless of the treats toggle."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 250.0, "fat_g": 100.0}
+        for include in (False, True):
+            with self.subTest(include_treats=include):
+                result = fm_mod.fit_meal(self.con, "SweetSpot", remaining=budget,
+                                         include_treats=include, meals_left_override=1)
+                names = self._item_names_in_orders(result)
+                found_regular = bool(names & self.REGULAR_NAMES)
+                self.assertTrue(found_regular,
+                                f"Regular items should appear with include_treats={include}")
+
+    def test_mcflurry_keyword_is_treat(self):
+        """The _is_treat helper classifies McFlurry correctly."""
+        self.assertTrue(fm_mod._is_treat("Vanilla McFlurry"))
+        self.assertTrue(fm_mod._is_treat("Chocolate McFlurry"))
+
+    def test_milkshake_keyword_is_treat(self):
+        self.assertTrue(fm_mod._is_treat("Strawberry Milkshake"))
+        self.assertTrue(fm_mod._is_treat("Vanilla Milk Shake"))
+
+    def test_sundae_keyword_is_treat(self):
+        self.assertTrue(fm_mod._is_treat("Hot Fudge Sundae"))
+
+    def test_regular_item_not_treat(self):
+        self.assertFalse(fm_mod._is_treat("Grilled Chicken Sandwich"))
+        self.assertFalse(fm_mod._is_treat("Crispy Fries"))
+        self.assertFalse(fm_mod._is_treat("Zero Cola"))
+        self.assertFalse(fm_mod._is_treat("Garden Salad"))
+
+
+# ---------------------------------------------------------------------------
+# Portion fallback tests
+# ---------------------------------------------------------------------------
 
 class FitMealPortionFallbackTest(unittest.TestCase):
     """When a food has NO portion rows, 100g is used as the serving."""
@@ -257,19 +516,21 @@ class FitMealPortionFallbackTest(unittest.TestCase):
     def test_no_portion_uses_100g_serving(self):
         """With no portion data, serving defaults to 100g, so kcal = 280."""
         budget = {"kcal": 300.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 50.0}
-        result = fm_mod.fit_meal(self.con, "Chain", remaining=budget)
-        # 280 kcal/100g * (100g/100) = 280 kcal — fits 300 budget
+        result = fm_mod.fit_meal(self.con, "Chain", remaining=budget,
+                                 meals_left_override=1)
+        # 280 kcal/100g * (100g/100) = 280 kcal — fits 300 ceiling
         burger_in_orders = any(
             any("NoPortionBurger" in it["name"] for it in order["items"])
             for order in result["orders"]
         )
         self.assertTrue(burger_in_orders,
-                        "Food with no portion should use 100g serving (280 kcal fits 300 budget)")
+                        "Food with no portion should use 100g serving (280 kcal fits 300 ceiling)")
 
     def test_no_portion_item_macro_is_100g_scale(self):
         """Item macros returned for a no-portion food must equal per-100g values."""
         budget = {"kcal": 300.0, "protein_g": 100.0, "carb_g": 100.0, "fat_g": 50.0}
-        result = fm_mod.fit_meal(self.con, "Chain", remaining=budget)
+        result = fm_mod.fit_meal(self.con, "Chain", remaining=budget,
+                                 meals_left_override=1)
         for order in result["orders"]:
             for item in order["items"]:
                 if "NoPortionBurger" in item["name"]:

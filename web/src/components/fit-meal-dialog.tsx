@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
-import { AlertCircle, Check, ChevronDown } from "lucide-react"
+import { AlertCircle, Check, ChevronDown, Minus, Plus } from "lucide-react"
 
-import { ApiError, fitMeal, getChains } from "@/api"
+import { ApiError, fitMeal, getChains, getSettings, setMealsPerDay } from "@/api"
 import { Field } from "@/components/field"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -114,6 +115,48 @@ function OrderCard({ order, rank }: { order: FitOrder; rank: number }) {
   )
 }
 
+/** Stepper for a small integer value (e.g. meals left today). */
+function Stepper({
+  value,
+  min,
+  max,
+  onChange,
+  label,
+}: {
+  value: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+  label: string
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-label={`Decrease ${label}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
+          disabled={value <= min}
+          onClick={() => onChange(Math.max(min, value - 1))}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="w-6 text-center text-sm font-medium tabular-nums">{value}</span>
+        <button
+          type="button"
+          aria-label={`Increase ${label}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
+          disabled={value >= max}
+          onClick={() => onChange(Math.min(max, value + 1))}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── main component ───────────────────────────────────────────────────────────
 
 export function FitMealDialog({
@@ -129,6 +172,9 @@ export function FitMealDialog({
   const [chains, setChains] = useState<string[]>([])
   const [chainsError, setChainsError] = useState<string | null>(null)
 
+  // meals setting from server (loaded when dialog opens)
+  const [settingsMpd, setSettingsMpd] = useState(3)
+
   // form state
   const [restaurant, setRestaurant] = useState("")
   const [overrideOpen, setOverrideOpen] = useState(false)
@@ -137,23 +183,35 @@ export function FitMealDialog({
   const [carbs, setCarbs] = useState("")
   const [fat, setFat] = useState("")
 
+  // per-meal controls
+  const [mealsLeft, setMealsLeft] = useState(settingsMpd)
+  const [includeTreats, setIncludeTreats] = useState(false)
+  const [savingMpd, setSavingMpd] = useState(false)
+
   // results
   const [result, setResult] = useState<FitMealResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // fetch chains when dialog opens
+  // fetch chains + settings when dialog opens
   useEffect(() => {
     if (!open) return
     setResult(null)
     setError(null)
     setRestaurant("")
     setOverrideOpen(false)
-    getChains()
-      .then(({ chains: c }) => setChains(c))
-      .catch((err: unknown) => {
+    setIncludeTreats(false)
+    Promise.all([
+      getChains().then(({ chains: c }) => setChains(c)).catch((err: unknown) => {
         setChainsError(err instanceof ApiError ? err.message : "Could not load chains")
-      })
+      }),
+      getSettings().then(({ meals_per_day }) => {
+        setSettingsMpd(meals_per_day)
+        setMealsLeft(meals_per_day)
+      }).catch(() => {
+        // Settings endpoint may not exist yet — fall back silently
+      }),
+    ])
   }, [open])
 
   // pre-fill budget fields from day remaining when override panel opens
@@ -186,7 +244,12 @@ export function FitMealDialog({
     }
 
     try {
-      const res = await fitMeal({ restaurant, remaining: override })
+      const res = await fitMeal({
+        restaurant,
+        remaining: override,
+        meals_left: mealsLeft,
+        include_treats: includeTreats,
+      })
       setResult(res)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not get meal suggestions")
@@ -203,7 +266,7 @@ export function FitMealDialog({
         <DialogHeader>
           <DialogTitle>Eating out?</DialogTitle>
           <DialogDescription>
-            Find orders that fit your remaining macros.
+            Find one meal that fits your macros — not the whole day.
           </DialogDescription>
         </DialogHeader>
 
@@ -238,6 +301,53 @@ export function FitMealDialog({
                 </div>
               </div>
             )}
+
+            {/* per-meal controls */}
+            <div className="rounded-lg border px-4 py-3 space-y-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Meal settings</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Stepper
+                  label="Meals left today"
+                  value={mealsLeft}
+                  min={1}
+                  max={10}
+                  onChange={setMealsLeft}
+                />
+                {mealsLeft !== settingsMpd && (
+                  <button
+                    type="button"
+                    disabled={savingMpd}
+                    className="text-xs text-spinach underline underline-offset-2 disabled:opacity-60"
+                    onClick={async () => {
+                      setSavingMpd(true)
+                      try {
+                        await setMealsPerDay(mealsLeft)
+                        setSettingsMpd(mealsLeft)
+                      } catch {
+                        // ignore — non-critical
+                      } finally {
+                        setSavingMpd(false)
+                      }
+                    }}
+                  >
+                    {savingMpd ? "Saving…" : "Save as default"}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="include-treats"
+                  checked={includeTreats}
+                  onCheckedChange={(checked) => setIncludeTreats(!!checked)}
+                />
+                <label
+                  htmlFor="include-treats"
+                  className="text-sm cursor-pointer select-none"
+                >
+                  Include a treat (dessert, shakes)
+                </label>
+              </div>
+            </div>
 
             {/* restaurant picker */}
             <fieldset>
@@ -348,12 +458,20 @@ export function FitMealDialog({
 
             <div>
               <h3 className="font-semibold">{result.restaurant}</h3>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground tabular-nums">
-                {result.budget.kcal != null && <span>{formatKcal(result.budget.kcal)} kcal budget</span>}
-                {result.budget.protein_g != null && <span>{formatGrams(result.budget.protein_g)} g protein</span>}
-                {result.budget.carb_g != null && <span>{formatGrams(result.budget.carb_g)} g carbs</span>}
-                {result.budget.fat_g != null && <span>{formatGrams(result.budget.fat_g)} g fat</span>}
-              </div>
+              {/* per-meal target (what one meal should eat) */}
+              {result.per_meal_target && (
+                <div className="mt-1.5 rounded-lg bg-mist px-3 py-2 text-xs tabular-nums text-muted-foreground">
+                  <span className="font-medium text-foreground">Per-meal target</span>
+                  {" ("}1 of {result.meals_left} meal{result.meals_left !== 1 ? "s" : ""} left{")"}:{" "}
+                  {result.per_meal_target.kcal != null && <span className="mr-2">{formatKcal(result.per_meal_target.kcal)} kcal</span>}
+                  {result.per_meal_target.protein_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.protein_g)} g protein</span>}
+                  {result.per_meal_target.carb_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.carb_g)} g carbs</span>}
+                  {result.per_meal_target.fat_g != null && <span>{formatGrams(result.per_meal_target.fat_g)} g fat</span>}
+                </div>
+              )}
+              {result.treats_excluded && (
+                <p className="mt-1 text-xs text-muted-foreground">Desserts &amp; shakes excluded</p>
+              )}
             </div>
 
             {result.note && (
@@ -365,7 +483,7 @@ export function FitMealDialog({
 
             {result.orders.length === 0 && !result.note && (
               <p className="text-sm text-muted-foreground">
-                No orders found that fit within that budget. Try loosening the limits.
+                No orders found that fit within that budget. Try increasing meals left or loosening the limits.
               </p>
             )}
 

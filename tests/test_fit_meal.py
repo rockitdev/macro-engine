@@ -539,5 +539,208 @@ class FitMealPortionFallbackTest(unittest.TestCase):
                     self.assertAlmostEqual(item["grams"], 100.0, delta=0.1)
 
 
+# ---------------------------------------------------------------------------
+# Overshoot regression tests (2026-10-15 scoring fix)
+# ---------------------------------------------------------------------------
+
+class FitMealOvershootRegressionTest(unittest.TestCase):
+    """Regression suite for the scoring bug where combos 2-3× over the per-meal
+    kcal/fat target ranked #1 because the old clamped-ratio score gave ANY
+    overshoot a perfect 1.0 similarity on that macro.
+
+    Scenario mirrors the real dev report:
+      per-meal target  1,001 kcal / 80 g protein / 100 g carbs / 31 g fat
+      bad #1 order     three-burger stack → 1,547 kcal / 87.8 g fat (~2.8× fat target)
+
+    We seed three items that reproduce the exact pathological totals, plus a
+    "NearTarget Sandwich" that lands within 5 % of the target on every macro.
+    The new asymmetric scoring must rank NearTarget first.
+    """
+
+    # Per-meal target from the real bug report
+    TARGET_KCAL    = 1001.0
+    TARGET_PROTEIN =   80.0
+    TARGET_CARB    =  100.0
+    TARGET_FAT     =   31.0
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        self._seed()
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _seed(self):
+        """Seed items that reproduce the overshoot scenario.
+
+        All items use 100 g portions so per-100g == per-serving (no scaling).
+
+        NearTarget Sandwich: lands just under the per-meal target on all macros.
+          960 kcal / 78 g prot / 96 g carb / 29 g fat
+
+        StackA / StackB / StackC: individually fit the per-meal ceiling (used
+        as the day ceiling when meals_left_override=1).  Together they reproduce
+        the 3-burger stack: ~1,547 kcal / 85.7 g prot / 113 g carb / 87.8 g fat.
+        They also all fit under the day ceiling of 3× the per-meal target when
+        meals_left_override=3, which is the real regression scenario.
+        """
+        # (name, kcal, protein_g, carb_g, fat_g) — 100 g portion
+        items = [
+            ("NearTarget Sandwich", 960.0, 78.0,  96.0,  29.0),
+            ("StackBurger A",       500.0, 20.0,  38.0,  29.0),
+            ("StackBurger B",       600.0, 30.0,  40.0,  30.0),
+            ("StackBurger C",       447.0, 35.7,  35.0,  28.8),
+        ]
+        for name, kcal, prot, carb, fat in items:
+            fid = self.con.execute(
+                "INSERT INTO foods (name, brand, source) VALUES (?, 'TestChain', 'manual') RETURNING id",
+                (name,),
+            ).fetchone()[0]
+            self.con.execute(
+                "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (fid, kcal, prot, carb, fat),
+            )
+            self.con.execute(
+                "INSERT INTO portions (food_id, label, grams) VALUES (?, '1 serving', 100.0)",
+                (fid,),
+            )
+        db.rebuild_fts(self.con)
+        self.con.commit()
+
+    # Day ceiling = 3× per-meal target (3 meals left), matching the real scenario.
+    _BUDGET_3X = {
+        "kcal":      TARGET_KCAL    * 3,
+        "protein_g": TARGET_PROTEIN * 3,
+        "carb_g":    TARGET_CARB    * 3,
+        "fat_g":     TARGET_FAT     * 3,
+    }
+
+    def _top_order(self, result: dict) -> dict:
+        self.assertGreater(len(result["orders"]), 0, "Solver should return at least one order")
+        return result["orders"][0]
+
+    # -- Score unit-level check ------------------------------------------------
+
+    def test_score_near_target_beats_overshoot(self):
+        """_score() must rank a near-target single item above the 3-burger stack.
+
+        Computed directly against the solver's _score() function so this test
+        catches regressions even before the full solver is wired up.
+        """
+        target = {
+            "kcal": self.TARGET_KCAL,
+            "protein_g": self.TARGET_PROTEIN,
+            "carb_g": self.TARGET_CARB,
+            "fat_g": self.TARGET_FAT,
+        }
+        near = {"kcal": 960.0, "protein_g": 78.0, "carb_g": 96.0, "fat_g": 29.0}
+        stack = {"kcal": 1547.0, "protein_g": 85.7, "carb_g": 113.0, "fat_g": 87.8}
+
+        score_near  = fm_mod._score(near, target)
+        score_stack = fm_mod._score(stack, target)
+
+        self.assertGreater(
+            score_near, score_stack,
+            f"NearTarget score ({score_near:.4f}) should beat 3-stack score "
+            f"({score_stack:.4f}); old clamped-ratio bug gave both ~1.0",
+        )
+
+    # -- Solver-level regression -----------------------------------------------
+
+    def test_top_order_does_not_massively_overshoot_kcal(self):
+        """With 3 meals left, the #1 order must not exceed 115 % of the kcal target.
+
+        Old bug: 3-burger stack (1,547 kcal = 154 % of target) ranked #1.
+        """
+        result = fm_mod.fit_meal(
+            self.con, "TestChain",
+            remaining=self._BUDGET_3X,
+            meals_left_override=3,
+        )
+        top = self._top_order(result)
+        kcal_limit = self.TARGET_KCAL * 1.15
+        self.assertLessEqual(
+            top["total"]["kcal"], kcal_limit,
+            f"#1 order kcal ({top['total']['kcal']}) exceeds 115 % of target "
+            f"({kcal_limit:.0f}); overshoot-blind scoring bug may have regressed",
+        )
+
+    def test_top_order_does_not_massively_overshoot_fat(self):
+        """With 3 meals left, the #1 order must not exceed 115 % of the fat target.
+
+        Old bug: 3-burger stack (87.8 g fat = 283 % of 31 g target) ranked #1.
+        """
+        result = fm_mod.fit_meal(
+            self.con, "TestChain",
+            remaining=self._BUDGET_3X,
+            meals_left_override=3,
+        )
+        top = self._top_order(result)
+        fat_limit = self.TARGET_FAT * 1.15
+        self.assertLessEqual(
+            top["total"]["fat_g"], fat_limit,
+            f"#1 order fat ({top['total']['fat_g']} g) exceeds 115 % of target "
+            f"({fat_limit:.1f} g); overshoot-blind scoring bug may have regressed",
+        )
+
+    def test_near_target_single_ranks_above_3burger_stack(self):
+        """NearTarget Sandwich must rank higher than any 3-item combo.
+
+        Verifies that the near-target single item actually wins the ranking,
+        not just that the #1 order is below the 115 % threshold.
+        """
+        result = fm_mod.fit_meal(
+            self.con, "TestChain",
+            remaining=self._BUDGET_3X,
+            meals_left_override=3,
+        )
+        top = self._top_order(result)
+        top_names = {it["name"] for it in top["items"]}
+        self.assertIn(
+            "NearTarget Sandwich", top_names,
+            f"#1 order should be NearTarget Sandwich, got items: {top_names}",
+        )
+        self.assertEqual(
+            len(top["items"]), 1,
+            f"#1 order should be a single item, got {len(top['items'])} items: {top_names}",
+        )
+
+    def test_3burger_stack_scores_below_near_target_in_isolation(self):
+        """The 3-burger stack (1,547/87.8) should have a lower fit_score than
+        the NearTarget Sandwich order even if it appears in the results.
+        """
+        result = fm_mod.fit_meal(
+            self.con, "TestChain",
+            remaining=self._BUDGET_3X,
+            meals_left_override=3,
+        )
+        # Find NearTarget order and 3-burger stack order (if present)
+        near_score = None
+        stack_score = None
+        for order in result["orders"]:
+            names = {it["name"] for it in order["items"]}
+            if "NearTarget Sandwich" in names and len(order["items"]) == 1:
+                near_score = order["fit_score"]
+            if (
+                "StackBurger A" in names
+                and "StackBurger B" in names
+                and "StackBurger C" in names
+            ):
+                stack_score = order["fit_score"]
+
+        if near_score is None:
+            self.fail("NearTarget Sandwich single order not found in results")
+
+        if stack_score is not None:
+            self.assertGreater(
+                near_score, stack_score,
+                f"NearTarget score ({near_score}) should exceed 3-stack score "
+                f"({stack_score})",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,14 +18,6 @@ import type { Day, FitMacroBudget, FitMealResult, FitOrder } from "@/types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function macroLabel(key: string) {
-  if (key === "kcal") return "kcal"
-  if (key === "protein_g") return "protein"
-  if (key === "carb_g") return "carbs"
-  if (key === "fat_g") return "fat"
-  return key
-}
-
 function blowLabel(key: string) {
   if (key === "kcal") return "calories"
   if (key === "protein_g") return "protein"

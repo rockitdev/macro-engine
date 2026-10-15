@@ -163,11 +163,14 @@ export type FitMacros = {
   fat_g: number
 }
 
+export type FitItemRole = "main" | "side" | "drink" | "other"
+
 export type FitItem = {
   name: string
   portion: string
   grams: number
   macros: FitMacros
+  role: FitItemRole
 }
 
 export type FitOrder = {

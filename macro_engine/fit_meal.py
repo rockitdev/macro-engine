@@ -92,6 +92,53 @@ _TREAT_KEYWORDS = frozenset([
     "banana split",
 ])
 
+# ── Item role classification (main / side / drink) ────────────────────────────
+# Used to enforce realistic combo composition (≤1 main, ≤1 side per order).
+# Prefer broad terms over per-item specifics — same philosophy as _TREAT_KEYWORDS.
+# Drinks that are also treats (shake) are excluded before we reach this classifier.
+
+_MAIN_KEYWORDS = frozenset([
+    "burger", "cheeseburger", "hamburger",
+    "big mac",
+    "quarter pounder",
+    "filet-o-fish", "filet o fish",
+    "mcchicken",
+    "mcnugget", "nugget",
+    "mcmuffin",
+    "mcgriddle",
+    "biscuit",       # biscuit sandwiches (biscuit alone is breakfast item, safe catch)
+    "wrap",
+    "sandwich",
+    "burrito",
+    "big breakfast", "deluxe breakfast",
+])
+
+_SIDE_KEYWORDS = frozenset([
+    "fries", "french fries",
+    "hash brown",
+    "salad",
+    "fruit n yogurt parfait", "yogurt parfait",
+    "apple slice",
+    "hotcake",       # standalone hotcakes (not as part of big breakfast)
+    "yogurt",
+])
+
+_DRINK_KEYWORDS = frozenset([
+    "coffee",
+    "latte",
+    "soft drink", "soda",
+    "juice",
+    " milk",         # leading space avoids "milkshake" (already a treat)
+    "smoothie",      # smoothie is also a treat; included for completeness
+    "cola", "sprite", "fanta", "orange drink",
+])
+
+# Role literal type (string for simplicity — no enum dependency)
+_ROLE_MAIN  = "main"
+_ROLE_SIDE  = "side"
+_ROLE_DRINK = "drink"
+_ROLE_OTHER = "other"  # uncategorised — treated as side for composition purposes
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +151,25 @@ def _is_treat(food_name: str) -> bool:
     """
     name_lower = food_name.lower()
     return any(kw in name_lower for kw in _TREAT_KEYWORDS)
+
+
+def classify_role(food_name: str) -> str:
+    """Classify a food item as 'main', 'side', 'drink', or 'other'.
+
+    Classification is keyword-based (case-insensitive substring match), mirroring
+    the treats classifier pattern.  'other' is treated as a side for the purpose
+    of combo composition (it can only appear once in an order alongside a main).
+
+    Priority: main > side > drink > other.  A 'Big Mac Wrap' matches main first.
+    """
+    name_lower = food_name.lower()
+    if any(kw in name_lower for kw in _MAIN_KEYWORDS):
+        return _ROLE_MAIN
+    if any(kw in name_lower for kw in _SIDE_KEYWORDS):
+        return _ROLE_SIDE
+    if any(kw in name_lower for kw in _DRINK_KEYWORDS):
+        return _ROLE_DRINK
+    return _ROLE_OTHER
 
 
 def _per_serving(food: dict, portions: list[dict]) -> tuple[dict, str, float]:
@@ -332,6 +398,7 @@ def fit_meal(
             "portion": label,
             "grams": grams,
             "macros": macros,
+            "role": classify_role(food["name"]),
         })
 
     if not items:
@@ -377,6 +444,21 @@ def fit_meal(
                 continue
             seen.add(key)
             combo_items = [items[i] for i in indices]
+
+            # ── Realistic combo composition ──────────────────────────────────
+            # At most ONE main (burger/sandwich/wrap/etc.) per order.
+            # At most ONE side (fries/salad/etc. and 'other' items) per order.
+            # Drinks are zero/low-calorie and may appear once alongside.
+            # This prevents stacking 2-3 mains (the original bug that prompted
+            # the overshoot scoring fix).  Treat items are already excluded above.
+            roles = [it["role"] for it in combo_items]
+            main_count  = roles.count(_ROLE_MAIN)
+            # 'other' items are treated as sides for composition purposes
+            side_count  = roles.count(_ROLE_SIDE) + roles.count(_ROLE_OTHER)
+            drink_count = roles.count(_ROLE_DRINK)
+            if main_count > 1 or side_count > 1 or drink_count > 1:
+                continue  # skip unrealistic stacks
+
             total = _sum_macros([it["macros"] for it in combo_items])
             # HARD CEILING: never exceed the day's full remaining
             if not _fits(total, ceiling):
@@ -400,6 +482,7 @@ def fit_meal(
                     "portion": it["portion"],
                     "grams": it["grams"],
                     "macros": it["macros"],
+                    "role": it["role"],
                 }
                 for it in combo_items
             ],

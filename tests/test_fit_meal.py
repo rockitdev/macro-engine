@@ -742,5 +742,207 @@ class FitMealOvershootRegressionTest(unittest.TestCase):
             )
 
 
+# ---------------------------------------------------------------------------
+# Role classifier tests (2026-10-15)
+# ---------------------------------------------------------------------------
+
+class FitMealClassifierTest(unittest.TestCase):
+    """Unit tests for classify_role() — keyword-based item classification."""
+
+    def _role(self, name: str) -> str:
+        return fm_mod.classify_role(name)
+
+    # Mains
+    def test_big_mac_is_main(self):
+        self.assertEqual(self._role("Big Mac"), "main")
+
+    def test_quarter_pounder_is_main(self):
+        self.assertEqual(self._role("Quarter Pounder with Cheese"), "main")
+
+    def test_hamburger_is_main(self):
+        self.assertEqual(self._role("Hamburger"), "main")
+
+    def test_cheeseburger_is_main(self):
+        self.assertEqual(self._role("Cheeseburger"), "main")
+
+    def test_filet_o_fish_is_main(self):
+        self.assertEqual(self._role("Filet-O-Fish"), "main")
+
+    def test_mcchicken_is_main(self):
+        self.assertEqual(self._role("McChicken"), "main")
+
+    def test_nuggets_is_main(self):
+        self.assertEqual(self._role("Chicken McNuggets 6pc"), "main")
+
+    def test_mcmuffin_is_main(self):
+        self.assertEqual(self._role("Egg McMuffin"), "main")
+
+    def test_wrap_is_main(self):
+        self.assertEqual(self._role("Grilled Chicken Wrap"), "main")
+
+    def test_sandwich_is_main(self):
+        self.assertEqual(self._role("McChicken Sandwich"), "main")
+
+    def test_big_breakfast_is_main(self):
+        self.assertEqual(self._role("Big Breakfast"), "main")
+
+    # Sides
+    def test_fries_is_side(self):
+        self.assertEqual(self._role("Medium French Fries"), "side")
+
+    def test_hash_brown_is_side(self):
+        self.assertEqual(self._role("Hash Brown"), "side")
+
+    def test_salad_is_side(self):
+        self.assertEqual(self._role("Garden Side Salad"), "side")
+
+    def test_apple_slices_is_side(self):
+        self.assertEqual(self._role("Apple Slices"), "side")
+
+    def test_hotcakes_is_side(self):
+        self.assertEqual(self._role("Hotcakes"), "side")
+
+    # Drinks
+    def test_coffee_is_drink(self):
+        self.assertEqual(self._role("Premium Roast Coffee"), "drink")
+
+    def test_latte_is_drink(self):
+        self.assertEqual(self._role("McCafé Latte"), "drink")
+
+    def test_cola_is_drink(self):
+        self.assertEqual(self._role("Coca-Cola"), "drink")
+
+    def test_juice_is_drink(self):
+        self.assertEqual(self._role("Orange Juice"), "drink")
+
+    # Other
+    def test_unknown_item_is_other(self):
+        self.assertEqual(self._role("Some Random Item XYZ"), "other")
+
+    def test_classifier_is_case_insensitive(self):
+        self.assertEqual(self._role("BIG MAC"), "main")
+        self.assertEqual(self._role("FRENCH FRIES"), "side")
+        self.assertEqual(self._role("COFFEE"), "drink")
+
+
+# ---------------------------------------------------------------------------
+# Combo composition tests (2026-10-15)
+# ---------------------------------------------------------------------------
+
+def _seed_composition_chain(con, *, chain: str = "ComboTest") -> dict[str, int]:
+    """Seed a chain with typed items for testing combo composition rules.
+
+    Main:  ClassicBurger    560 kcal / 219g
+    Side:  SmallFries       350 kcal / 117g
+    Drink: ZeroCola           0 kcal / 500g
+    Side2: GardenSalad       22 kcal / 150g
+    Main2: ChickenSandwich  480 kcal / 190g   (second main — must not pair with ClassicBurger)
+    """
+    foods = [
+        # (name,              kcal/100g, prot/100g, carb/100g, fat/100g, label, grams)
+        ("ClassicBurger",       257.0, 12.6, 24.0, 12.0, "1 burger", 219.0),
+        ("SmallFries",          300.0,  3.5, 38.0, 15.0, "small",    117.0),
+        ("ZeroCola",              0.0,  0.0,  0.1,  0.0, "medium",   500.0),
+        ("GardenSalad",          15.0,  1.2,  2.5,  0.5, "side",     150.0),
+        ("ChickenSandwich",     252.0, 14.0, 26.0, 10.0, "1 piece",  190.0),
+    ]
+    ids: dict[str, int] = {}
+    for name, kcal, prot, carb, fat, plabel, pgrams in foods:
+        fid = con.execute(
+            "INSERT INTO foods (name, brand, source) VALUES (?, ?, 'manual') RETURNING id",
+            (name, chain),
+        ).fetchone()[0]
+        con.execute(
+            "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (fid, kcal, prot, carb, fat),
+        )
+        con.execute(
+            "INSERT INTO portions (food_id, label, grams) VALUES (?, ?, ?)",
+            (fid, plabel, pgrams),
+        )
+        ids[name] = fid
+    from macro_engine import db
+    db.rebuild_fts(con)
+    con.commit()
+    return ids
+
+
+class FitMealCompositionTest(unittest.TestCase):
+    """Verify that returned orders obey ≤1 main and ≤1 side composition rules."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        self.ids = _seed_composition_chain(self.con)
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def test_no_order_contains_two_mains(self):
+        """No returned order should contain more than one main item."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 300.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "ComboTest", remaining=budget,
+                                 meals_left_override=1)
+        for order in result["orders"]:
+            main_count = sum(1 for it in order["items"] if it["role"] == "main")
+            self.assertLessEqual(main_count, 1,
+                                 f"Order rank {order['rank']} has {main_count} mains: "
+                                 f"{[it['name'] for it in order['items']]}")
+
+    def test_main_plus_side_can_outrank_single_main(self):
+        """A main+side combo that hits the per-meal target can rank above a single main.
+
+        Per-meal target: 600 kcal / 40g protein / 70g carb / 35g fat (meals_left=1).
+        ClassicBurger alone:           ~562 kcal / 27.6g prot / 52.6g carb / 26.3g fat.
+        ClassicBurger + GardenSalad:   ~585 kcal / 29.4g prot / 56.4g carb / 27.1g fat.
+        The combo is closer to the 600 kcal / 40g protein target, so it should rank
+        at least as high as the single-main order; either way the combo must appear.
+        """
+        # Budget chosen so ClassicBurger AND ClassicBurger+GardenSalad both fit
+        budget = {"kcal": 600.0, "protein_g": 40.0, "carb_g": 70.0, "fat_g": 35.0}
+        result = fm_mod.fit_meal(self.con, "ComboTest", remaining=budget,
+                                 meals_left_override=1)
+        self.assertGreater(len(result["orders"]), 0, "Should return at least one order")
+        # Verify that at least one order is a main+side combo
+        combos_found = any(
+            len(order["items"]) > 1
+            and any(it["role"] == "main" for it in order["items"])
+            and any(it["role"] in ("side", "other") for it in order["items"])
+            for order in result["orders"]
+        )
+        # The combo fits the budget and should appear in results
+        self.assertTrue(combos_found,
+                        "Expected at least one main+side combo in orders; "
+                        f"got: {[[(it['name'], it['role']) for it in o['items']] for o in result['orders']]}")
+
+    def test_each_item_carries_role_field(self):
+        """Every item in every returned order must have a 'role' field."""
+        budget = {"kcal": 1000.0, "protein_g": 80.0, "carb_g": 100.0, "fat_g": 50.0}
+        result = fm_mod.fit_meal(self.con, "ComboTest", remaining=budget,
+                                 meals_left_override=1)
+        for order in result["orders"]:
+            for item in order["items"]:
+                self.assertIn("role", item,
+                              f"Item {item['name']!r} missing 'role' field")
+                self.assertIn(item["role"], ("main", "side", "drink", "other"),
+                              f"Item {item['name']!r} has invalid role {item['role']!r}")
+
+    def test_no_order_has_two_sides(self):
+        """No returned order should have more than one side item."""
+        budget = {"kcal": 2000.0, "protein_g": 200.0, "carb_g": 300.0, "fat_g": 100.0}
+        result = fm_mod.fit_meal(self.con, "ComboTest", remaining=budget,
+                                 meals_left_override=1)
+        for order in result["orders"]:
+            side_count = sum(
+                1 for it in order["items"]
+                if it["role"] in ("side", "other")
+            )
+            self.assertLessEqual(side_count, 1,
+                                 f"Order rank {order['rank']} has {side_count} sides: "
+                                 f"{[it['name'] for it in order['items']]}")
+
+
 if __name__ == "__main__":
     unittest.main()

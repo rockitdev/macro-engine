@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS log (
     fat_g     REAL NOT NULL DEFAULT 0,
     fiber_g   REAL NOT NULL DEFAULT 0,
     raw_text  TEXT,
-    estimated INTEGER NOT NULL DEFAULT 0
+    estimated INTEGER NOT NULL DEFAULT 0,
+    -- breakfast | lunch | dinner | snacks; null on rows logged before meals
+    meal      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_log_date ON log(date);
 
@@ -90,6 +92,12 @@ CREATE TABLE IF NOT EXISTS targets (
     created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Preferences. week_starts_on is a weekday name; absent means monday.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS food_fts USING fts5(name, brand, store, content='', tokenize='porter unicode61');
 """
 
@@ -102,6 +110,9 @@ def _migrate(con: sqlite3.Connection) -> None:
     tcols = {r["name"] for r in con.execute("PRAGMA table_info(targets)")}
     if "fiber_g" not in tcols:
         con.execute("ALTER TABLE targets ADD COLUMN fiber_g REAL")
+    lcols = {r["name"] for r in con.execute("PRAGMA table_info(log)")}
+    if lcols and "meal" not in lcols:
+        con.execute("ALTER TABLE log ADD COLUMN meal TEXT")
 
 
 def connect(db_path=None) -> sqlite3.Connection:

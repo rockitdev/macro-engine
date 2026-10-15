@@ -37,9 +37,21 @@ from . import resolve, tracker
 # The four macros we budget against. fiber_g is informational only.
 _BUDGET_MACROS = ("kcal", "protein_g", "carb_g", "fat_g")
 
-# Protein is twice as important as carbs/fat when ranking how close an order
-# is to the per-meal target. kcal is a secondary tiebreaker.
-_WEIGHTS = {"kcal": 0.2, "protein_g": 1.5, "carb_g": 0.4, "fat_g": 0.4}
+# Base per-macro weights for the distance-based fit score.
+# Protein gets a higher weight so under-hitting the protein target is penalised
+# more than missing kcal/carb/fat — this implements the "protein-forward tiebreak"
+# WITHOUT allowing it to override kcal/fat overshoot (see _OVERSHOOT_FACTORS).
+_MACRO_WEIGHTS = {"kcal": 0.5, "protein_g": 2.0, "carb_g": 0.5, "fat_g": 0.5}
+
+# Extra multiplier applied on top of _MACRO_WEIGHTS when a combo OVERSHOOTS the
+# per-meal target on a given macro.  Values > 1 mean "going over is worse than
+# going under by the same fraction."
+#   • kcal/fat: ×4 → overshoot is 4× more costly than undershoot.
+#     A combo 50 % over on kcal/fat scores far worse than one that's 50 % under.
+#   • protein: ×0.3 → overshooting protein is FORGIVEN (more protein is acceptable).
+#     Effective overshoot cost = 2.0 × 0.3 = 0.6, less than the undershoot cost of 2.0.
+#   • carb: ×2 → mild overshoot penalty (carbs are not as sensitive as fat).
+_OVERSHOOT_FACTORS = {"kcal": 4.0, "protein_g": 0.3, "carb_g": 2.0, "fat_g": 4.0}
 
 # Items fetched from the search for the chain before solving. 40 is enough for
 # any chain while keeping triple-combo enumeration fast (~10k iterations max).
@@ -130,23 +142,48 @@ def _fits(combo_macros: dict, ceiling: dict) -> bool:
 
 
 def _score(combo_macros: dict, target: dict) -> float:
-    """Rank how close a combo is to the per-meal target (lower distance = higher score).
+    """Rank how close a combo is to the per-meal target (higher score = better fit).
 
-    Returns a score ∈ [0, ∞) where HIGHER means a CLOSER fit.  We compute a
-    weighted similarity: each macro's ratio (used / target) is clamped to [0, 1]
-    and weighted.  A combo that exactly matches the target on all macros scores
-    the maximum.  Over-target combos are already excluded by _fits().
+    Returns a score ∈ (0, 1] where 1.0 is a perfect match.  The score is based
+    on an asymmetric weighted distance:
 
-    Protein gets the highest weight so it wins ties (Ryan eats protein-forward).
-    Unconstrained macros (target = inf) are skipped to avoid zero-division.
+        penalty_k = relative_error_k × _MACRO_WEIGHTS[k]
+                    × (_OVERSHOOT_FACTORS[k] if overshooting else 1.0)
+
+        relative_error_k = |used_k − target_k| / target_k
+
+        score = 1 / (1 + Σ penalty_k)
+
+    Key properties:
+    • Overshooting kcal or fat is penalised 4× harder than undershooting by the
+      same fraction.  A combo 50 % over on kcal/fat scores far below a combo that
+      is 50 % under on those macros.
+    • Undershooting protein (not hitting the target) is penalised with weight 2.0,
+      making protein the primary tiebreaker among otherwise similar combos.
+    • Overshooting protein is forgiven (effective factor 0.6), because having more
+      protein than targeted is acceptable for this use-case.
+    • Unconstrained macros (target = inf or 0) are skipped to avoid division by zero.
+
+    This replaces the old clamped-ratio approach, which gave every over-target
+    combo a perfect 1.0 similarity on that macro (because min(used/target, 1) == 1
+    for any overshoot).  The old approach let a 3-burger stack score identically
+    to an exact match on kcal/fat.
     """
-    s = 0.0
-    for k, w in _WEIGHTS.items():
-        t = target[k]
-        if t != float("inf") and t > 0:
-            ratio = min(combo_macros.get(k, 0.0) / t, 1.0)
-            s += w * ratio
-    return s
+    total_penalty = 0.0
+    for k in _BUDGET_MACROS:
+        t = target.get(k, float("inf"))
+        if t == float("inf") or t <= 0:
+            continue
+        used = combo_macros.get(k, 0.0)
+        relative_error = abs(used - t) / t
+        base_w = _MACRO_WEIGHTS[k]
+        if used > t:
+            # Overshoot: apply extra factor (kcal/fat overshoot costs much more)
+            total_penalty += relative_error * base_w * _OVERSHOOT_FACTORS[k]
+        else:
+            # Undershoot: normal weight
+            total_penalty += relative_error * base_w
+    return 1.0 / (1.0 + total_penalty)
 
 
 def _sum_macros(macros_list: list[dict]) -> dict:

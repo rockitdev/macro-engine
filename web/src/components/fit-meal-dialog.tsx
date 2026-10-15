@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/bottom-sheet"
 import { Input } from "@/components/ui/input"
 import { formatGrams, formatKcal } from "@/lib/format"
-import type { Day, FitMacroBudget, FitMealResult, FitOrder } from "@/types"
+import type { Day, FitMacroBudget, FitMealResult, FitItem, FitItemRole, FitOrder } from "@/types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +32,27 @@ function parseOptNum(s: string): number | null {
 }
 
 // ── sub-components ───────────────────────────────────────────────────────────
+
+/** Small accessible role badge (Main / Side / Drink). Not color-only — text label always shown. */
+function RoleBadge({ role }: { role: FitItemRole }) {
+  if (role === "other") return null  // uncategorised items get no badge
+  const label = role === "main" ? "Main" : role === "side" ? "Side" : "Drink"
+  // Styled to match the existing chip / MacroRow pattern (Geist, #1e6b45 spinach green for main)
+  const cls =
+    role === "main"
+      ? "bg-spinach/15 text-spinach"
+      : role === "side"
+      ? "bg-grain/20 text-foreground"
+      : "bg-mist text-muted-foreground"
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${cls}`}
+      aria-label={`Role: ${label}`}
+    >
+      {label}
+    </span>
+  )
+}
 
 function MacroRow({
   label,
@@ -78,7 +99,10 @@ function OrderCard({ order, rank }: { order: FitOrder; rank: number }) {
         <div className="border-t px-4 pb-4 pt-3 space-y-3">
           {order.items.map((item, i) => (
             <div key={i}>
-              <p className="text-sm font-medium">{item.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-medium">{item.name}</p>
+                <RoleBadge role={item.role} />
+              </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{item.portion}</p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <MacroRow label="kcal" value={item.macros.kcal} fillClass="bg-mist text-foreground" />

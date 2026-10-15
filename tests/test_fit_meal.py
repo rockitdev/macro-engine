@@ -799,8 +799,12 @@ class FitMealClassifierTest(unittest.TestCase):
     def test_apple_slices_is_side(self):
         self.assertEqual(self._role("Apple Slices"), "side")
 
-    def test_hotcakes_is_side(self):
-        self.assertEqual(self._role("Hotcakes"), "side")
+    def test_hotcakes_is_main(self):
+        """Hotcakes are a breakfast main — never a side to a burger."""
+        self.assertEqual(self._role("Hotcakes"), "main")
+
+    def test_hotcakes_and_sausage_is_main(self):
+        self.assertEqual(self._role("Hotcakes and Sausage"), "main")
 
     # Drinks
     def test_coffee_is_drink(self):
@@ -942,6 +946,215 @@ class FitMealCompositionTest(unittest.TestCase):
             self.assertLessEqual(side_count, 1,
                                  f"Order rank {order['rank']} has {side_count} sides: "
                                  f"{[it['name'] for it in order['items']]}")
+
+
+# ---------------------------------------------------------------------------
+# Breakfast classification + coherence tests (2026-10-15 fix)
+# ---------------------------------------------------------------------------
+
+class FitMealBreakfastClassifierTest(unittest.TestCase):
+    """Unit tests for the reclassified breakfast items and _is_breakfast helper."""
+
+    def _role(self, name: str) -> str:
+        return fm_mod.classify_role(name)
+
+    # Breakfast entrees must be MAIN, not side
+    def test_hotcakes_is_main(self):
+        self.assertEqual(self._role("Hotcakes"), "main")
+
+    def test_hotcakes_and_sausage_is_main(self):
+        self.assertEqual(self._role("Hotcakes and Sausage"), "main")
+
+    def test_mcgriddle_is_main(self):
+        self.assertEqual(self._role("Sausage McGriddle"), "main")
+
+    def test_mcmuffin_is_main(self):
+        self.assertEqual(self._role("Egg McMuffin"), "main")
+
+    def test_biscuit_sandwich_is_main(self):
+        self.assertEqual(self._role("Sausage Biscuit with Egg"), "main")
+
+    def test_big_breakfast_is_main(self):
+        self.assertEqual(self._role("Big Breakfast"), "main")
+
+    def test_deluxe_breakfast_is_main(self):
+        self.assertEqual(self._role("Big Breakfast Deluxe"), "main")
+
+    def test_breakfast_burrito_is_main(self):
+        self.assertEqual(self._role("Breakfast Burrito"), "main")
+
+    # Genuine add-on sides
+    def test_fries_is_side(self):
+        self.assertEqual(self._role("Medium French Fries"), "side")
+
+    def test_hash_brown_is_side(self):
+        self.assertEqual(self._role("Hash Brown"), "side")
+
+    def test_side_salad_is_side(self):
+        self.assertEqual(self._role("Side Salad"), "side")
+
+    def test_yogurt_parfait_is_side(self):
+        self.assertEqual(self._role("Fruit 'n Yogurt Parfait"), "side")
+
+    def test_apple_slices_is_side(self):
+        self.assertEqual(self._role("Apple Slices"), "side")
+
+    # _is_breakfast helper
+    def test_is_breakfast_mcmuffin(self):
+        self.assertTrue(fm_mod._is_breakfast("Egg McMuffin"))
+
+    def test_is_breakfast_mcgriddle(self):
+        self.assertTrue(fm_mod._is_breakfast("Bacon, Egg & Cheese McGriddle"))
+
+    def test_is_breakfast_hotcakes(self):
+        self.assertTrue(fm_mod._is_breakfast("Hotcakes"))
+
+    def test_is_breakfast_hash_brown(self):
+        self.assertTrue(fm_mod._is_breakfast("Hash Brown"))
+
+    def test_not_breakfast_big_mac(self):
+        self.assertFalse(fm_mod._is_breakfast("Big Mac"))
+
+    def test_not_breakfast_quarter_pounder(self):
+        self.assertFalse(fm_mod._is_breakfast("Quarter Pounder with Cheese"))
+
+    def test_not_breakfast_fries(self):
+        self.assertFalse(fm_mod._is_breakfast("Medium French Fries"))
+
+
+def _seed_breakfast_chain(con, *, chain: str = "BreakfastTest") -> dict[str, int]:
+    """Seed a McDonald's-style menu with breakfast and lunch/dinner items.
+
+    Breakfast items:  Egg McMuffin, Hash Brown, Hotcakes
+    Lunch/dinner:     Big Mac, Medium French Fries, Quarter Pounder
+    """
+    foods = [
+        # (name, kcal/100g, prot/100g, carb/100g, fat/100g, label, grams)
+        ("Egg McMuffin",             200.0, 18.0, 27.0,  9.0, "1 sandwich", 135.0),
+        ("Hash Brown",               270.0,  2.5, 30.0, 15.0, "1 piece",     55.0),
+        ("Hotcakes",                 175.0,  5.0, 33.0,  3.5, "1 serving",  200.0),
+        ("Big Mac",                  257.0, 12.6, 24.0, 12.0, "1 burger",   219.0),
+        ("Medium French Fries",      300.0,  3.5, 38.0, 15.0, "medium",     117.0),
+        ("Quarter Pounder Cheese",   250.0, 16.0, 25.0, 11.0, "1 burger",   230.0),
+    ]
+    ids: dict[str, int] = {}
+    for name, kcal, prot, carb, fat, plabel, pgrams in foods:
+        fid = con.execute(
+            "INSERT INTO foods (name, brand, source) VALUES (?, ?, 'manual') RETURNING id",
+            (name, chain),
+        ).fetchone()[0]
+        con.execute(
+            "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (fid, kcal, prot, carb, fat),
+        )
+        con.execute(
+            "INSERT INTO portions (food_id, label, grams) VALUES (?, ?, ?)",
+            (fid, plabel, pgrams),
+        )
+        ids[name] = fid
+    from macro_engine import db as _db
+    _db.rebuild_fts(con)
+    con.commit()
+    return ids
+
+
+class FitMealBreakfastCoherenceTest(unittest.TestCase):
+    """Breakfast coherence: solver must never combine breakfast and non-breakfast items."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        self.ids = _seed_breakfast_chain(self.con)
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    BREAKFAST_NAMES = {"Egg McMuffin", "Hash Brown", "Hotcakes"}
+    LUNCH_NAMES = {"Big Mac", "Medium French Fries", "Quarter Pounder Cheese"}
+
+    def _all_item_names(self, result: dict) -> list[set]:
+        """Return a list of name-sets, one per order."""
+        return [
+            {it["name"] for it in order["items"]}
+            for order in result["orders"]
+        ]
+
+    def test_no_combo_mixes_breakfast_and_lunch(self):
+        """No recommended order may mix a breakfast item with a lunch/dinner item."""
+        budget = {"kcal": 3000.0, "protein_g": 200.0, "carb_g": 300.0, "fat_g": 120.0}
+        result = fm_mod.fit_meal(self.con, "BreakfastTest", remaining=budget,
+                                 meals_left_override=1)
+        for order in result["orders"]:
+            names = {it["name"] for it in order["items"]}
+            has_breakfast = bool(names & self.BREAKFAST_NAMES)
+            has_lunch = bool(names & self.LUNCH_NAMES)
+            self.assertFalse(
+                has_breakfast and has_lunch,
+                f"Order mixes breakfast and lunch: {names}",
+            )
+
+    def test_breakfast_combo_is_allowed(self):
+        """Egg McMuffin + Hash Brown is a valid all-breakfast combo.
+
+        Egg McMuffin serving:  270 kcal / 24.3g prot / 36.5g carb / 12.2g fat
+        Hash Brown serving:    149 kcal /  1.4g prot / 16.5g carb /  8.3g fat
+        Combo total:          ~419 kcal / 25.7g prot / 53.0g carb / 20.4g fat
+
+        Budget is tuned to match this combo so scoring puts it in the top 3.
+        """
+        budget = {"kcal": 450.0, "protein_g": 30.0, "carb_g": 60.0, "fat_g": 25.0}
+        result = fm_mod.fit_meal(self.con, "BreakfastTest", remaining=budget,
+                                 meals_left_override=1)
+        combo_present = any(
+            {"Egg McMuffin", "Hash Brown"}.issubset({it["name"] for it in order["items"]})
+            for order in result["orders"]
+        )
+        self.assertTrue(combo_present,
+                        "Egg McMuffin + Hash Brown (all breakfast) should be a valid combo; "
+                        f"got: {[{it['name'] for it in o['items']} for o in result['orders']]}")
+
+    def test_burger_fries_combo_is_top_order(self):
+        """Big Mac + French Fries (all non-breakfast) is a valid and expected combo.
+
+        With a budget tuned to that combo (~912 kcal / 16.1g prot / 96.7g carb / 44.0g fat)
+        it should appear in orders without being blocked by the coherence guard.
+        """
+        budget = {"kcal": 1000.0, "protein_g": 50.0, "carb_g": 110.0, "fat_g": 50.0}
+        result = fm_mod.fit_meal(self.con, "BreakfastTest", remaining=budget,
+                                 meals_left_override=1)
+        combo_present = any(
+            {"Big Mac", "Medium French Fries"}.issubset({it["name"] for it in order["items"]})
+            for order in result["orders"]
+        )
+        self.assertTrue(combo_present,
+                        "Big Mac + French Fries (all non-breakfast) should appear in orders; "
+                        f"got: {[{it['name'] for it in o['items']} for o in result['orders']]}")
+
+    def test_single_breakfast_item_is_fine(self):
+        """A single breakfast item (Egg McMuffin alone) is always valid."""
+        budget = {"kcal": 300.0, "protein_g": 30.0, "carb_g": 40.0, "fat_g": 15.0}
+        result = fm_mod.fit_meal(self.con, "BreakfastTest", remaining=budget,
+                                 meals_left_override=1)
+        mcmuffin_present = any(
+            any(it["name"] == "Egg McMuffin" for it in order["items"])
+            for order in result["orders"]
+        )
+        self.assertTrue(mcmuffin_present,
+                        "Single Egg McMuffin should appear in orders when it fits the budget")
+
+    def test_single_non_breakfast_item_is_fine(self):
+        """A single non-breakfast item (Big Mac alone) is always valid."""
+        budget = {"kcal": 600.0, "protein_g": 30.0, "carb_g": 60.0, "fat_g": 30.0}
+        result = fm_mod.fit_meal(self.con, "BreakfastTest", remaining=budget,
+                                 meals_left_override=1)
+        bigmac_present = any(
+            any(it["name"] == "Big Mac" for it in order["items"])
+            for order in result["orders"]
+        )
+        self.assertTrue(bigmac_present,
+                        "Single Big Mac should appear in orders when it fits the budget")
 
 
 if __name__ == "__main__":

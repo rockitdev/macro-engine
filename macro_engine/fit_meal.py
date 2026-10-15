@@ -107,6 +107,7 @@ _MAIN_KEYWORDS = frozenset([
     "mcmuffin",
     "mcgriddle",
     "biscuit",       # biscuit sandwiches (biscuit alone is breakfast item, safe catch)
+    "hotcake",       # Hotcakes / Hotcakes and Sausage — breakfast mains, never a side
     "wrap",
     "sandwich",
     "burrito",
@@ -119,8 +120,22 @@ _SIDE_KEYWORDS = frozenset([
     "salad",
     "fruit n yogurt parfait", "yogurt parfait",
     "apple slice",
-    "hotcake",       # standalone hotcakes (not as part of big breakfast)
     "yogurt",
+])
+
+# Items that are breakfast-only (used to enforce breakfast coherence in combos).
+# A combo must not mix a breakfast item with a non-breakfast item.
+# Keyword matching follows the same case-insensitive substring pattern.
+_BREAKFAST_KEYWORDS = frozenset([
+    "hotcake",            # Hotcakes, Hotcakes and Sausage
+    "mcmuffin",
+    "mcgriddle",
+    "biscuit",            # biscuit sandwiches (Sausage Biscuit, etc.)
+    "big breakfast",
+    "deluxe breakfast",
+    "burrito",            # Breakfast Burrito
+    "hash brown",
+    "fruit n yogurt parfait", "yogurt parfait",  # morning sides
 ])
 
 _DRINK_KEYWORDS = frozenset([
@@ -151,6 +166,17 @@ def _is_treat(food_name: str) -> bool:
     """
     name_lower = food_name.lower()
     return any(kw in name_lower for kw in _TREAT_KEYWORDS)
+
+
+def _is_breakfast(food_name: str) -> bool:
+    """Return True if the food name matches a breakfast-only keyword.
+
+    Used to enforce breakfast coherence in combos: a recommended order may
+    not mix a breakfast item (McMuffin, Hotcakes, etc.) with a non-breakfast
+    item (Big Mac, Quarter Pounder, etc.).
+    """
+    name_lower = food_name.lower()
+    return any(kw in name_lower for kw in _BREAKFAST_KEYWORDS)
 
 
 def classify_role(food_name: str) -> str:
@@ -387,7 +413,10 @@ def fit_meal(
     for food in candidates:
         if food.get("kcal") is None:
             continue  # skip rows with no nutrition data
-        if not include_treats and _is_treat(food["name"]):
+        # Breakfast items (McGriddle, McMuffin, …) take priority over the treat
+        # keyword list even if their name contains a treat substring (e.g.
+        # "McMuffin" matches the broad "muffin" treat keyword).
+        if not include_treats and _is_treat(food["name"]) and not _is_breakfast(food["name"]):
             treats_present = True
             continue  # exclude treats by default
         portions = food.get("portions") or resolve.get_portions(con, food["id"])
@@ -458,6 +487,15 @@ def fit_meal(
             drink_count = roles.count(_ROLE_DRINK)
             if main_count > 1 or side_count > 1 or drink_count > 1:
                 continue  # skip unrealistic stacks
+
+            # ── Breakfast coherence ──────────────────────────────────────────
+            # A combo must not mix breakfast items (McMuffin, Hotcakes, …) with
+            # non-breakfast items (Big Mac, Quarter Pounder, …).  A single item
+            # is always fine regardless of its category.
+            if len(combo_items) > 1:
+                breakfast_flags = [_is_breakfast(it["name"]) for it in combo_items]
+                if any(breakfast_flags) and not all(breakfast_flags):
+                    continue  # mixed breakfast/non-breakfast combo — skip
 
             total = _sum_macros([it["macros"] for it in combo_items])
             # HARD CEILING: never exceed the day's full remaining

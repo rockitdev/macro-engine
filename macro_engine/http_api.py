@@ -165,19 +165,8 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         if raw_text is not None and not isinstance(raw_text, str):
             raise ValueError("raw_text must be a string")
         with _connect() as con:
-            _send_json(handler, 200, tracker.log_meal(con, items, date, raw_text, body.get("meal")))
-        return
-
-    if method == "POST" and len(parts) == 3 and parts[:2] == ["api", "log"]:
-        log_id = _as_int(parts[2], "log_id")
-        body = _read_body(handler)
-        if "meal" not in body:
-            raise ValueError("missing meal")
-        with _connect() as con:
-            updated = tracker.set_log_meal(con, log_id, body["meal"])
-        if not updated:
-            raise ApiError(404, f"no log entry {log_id}")
-        _send_json(handler, 200, updated)
+            result = tracker.log_meal(con, items, date, raw_text)
+        _send_json(handler, 200, result)
         return
 
     if method == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "log"]:
@@ -256,6 +245,12 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         _send_json(handler, 200, saved)
         return
 
+    if method == "GET" and path == "/api/chains":
+        with _connect() as con:
+            result = _fit_meal_mod.chains(con)
+        _send_json(handler, 200, result)
+        return
+
     if method == "POST" and path == "/api/fit-meal":
         body = _read_body(handler)
         _missing(body, "restaurant")
@@ -269,7 +264,8 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         if date is not None:
             date = tracker._valid_date(date)
         with _connect() as con:
-            _send_json(handler, 200, _fit_meal_mod.fit_meal(con, restaurant, override, date))
+            result = _fit_meal_mod.fit_meal(con, restaurant, override, date)
+        _send_json(handler, 200, result)
         return
 
     if method == "GET" and not path.startswith("/api"):

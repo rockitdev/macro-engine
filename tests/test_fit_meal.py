@@ -278,5 +278,118 @@ class FitMealPortionFallbackTest(unittest.TestCase):
                     self.assertAlmostEqual(item["grams"], 100.0, delta=0.1)
 
 
+class ChainHeuristicTest(unittest.TestCase):
+    """Unit tests for _titlecase and _looks_like_chain heuristics."""
+
+    # ── _titlecase ───────────────────────────────────────────────────────────
+
+    def test_titlecase_basic(self):
+        self.assertEqual(fm_mod._titlecase("tim hortons"), "Tim Hortons")
+
+    def test_titlecase_preserves_apostrophe_case(self):
+        """str.title() turns "McDonald's" into "Mcdonald'S"; we fix the 'S."""
+        result = fm_mod._titlecase("mcdonald's")
+        self.assertNotIn("'S", result,
+                         "_titlecase must not capitalise the letter after an apostrophe")
+        self.assertTrue(result[0].isupper(), "first letter must be upper-case")
+
+    def test_titlecase_already_correct(self):
+        self.assertEqual(fm_mod._titlecase("A&W"), "A&W")
+
+    def test_titlecase_all_upper(self):
+        result = fm_mod._titlecase("BURGER KING")
+        self.assertEqual(result, "Burger King")
+
+    def test_titlecase_single_word(self):
+        self.assertEqual(fm_mod._titlecase("subway"), "Subway")
+
+    # ── _looks_like_chain ────────────────────────────────────────────────────
+
+    def test_accepts_typical_names(self):
+        for name in ["McDonald's", "Tim Hortons", "Subway", "7-Eleven", "A&W",
+                     "Five Guys", "Popeyes"]:
+            with self.subTest(name=name):
+                self.assertTrue(fm_mod._looks_like_chain(name),
+                                f"Expected {name!r} to look like a chain")
+
+    def test_rejects_empty_string(self):
+        self.assertFalse(fm_mod._looks_like_chain(""))
+
+    def test_rejects_whitespace_only(self):
+        self.assertFalse(fm_mod._looks_like_chain("   "))
+
+    def test_rejects_url(self):
+        self.assertFalse(fm_mod._looks_like_chain("http://example.com/menu"))
+
+    def test_rejects_overlong_name(self):
+        self.assertFalse(fm_mod._looks_like_chain("A" * 65))
+
+    def test_accepts_name_with_dot(self):
+        self.assertTrue(fm_mod._looks_like_chain("St. Hubert"))
+
+    def test_accepts_name_with_ampersand(self):
+        self.assertTrue(fm_mod._looks_like_chain("Fish & Chips Co."))
+
+
+class ChainsDbTest(unittest.TestCase):
+    """Tests for chains() — fetching distinct chain names from the DB."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+        # Insert two chains; one food has no macros (should be excluded)
+        for name, brand, kcal in [
+            ("Classic Patty", "FakeBurger", 257.0),
+            ("Crispy Fries", "FakeBurger", 300.0),
+            ("Signature Wrap", "SandwichCo", 210.0),
+            ("Mystery Item", "GhostChain", None),  # no macros — must be excluded
+        ]:
+            fid = self.con.execute(
+                "INSERT INTO foods (name, brand, source) VALUES (?, ?, 'manual') RETURNING id",
+                (name, brand),
+            ).fetchone()[0]
+            if kcal is not None:
+                self.con.execute(
+                    "INSERT INTO food_nutrients (food_id, kcal, protein_g, carb_g, fat_g) "
+                    "VALUES (?, ?, 10, 20, 5)",
+                    (fid, kcal),
+                )
+        db.rebuild_fts(self.con)
+        self.con.commit()
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def test_returns_chains_with_macro_data(self):
+        result = fm_mod.chains(self.con)
+        # Brands are returned as stored in the DB (not title-cased)
+        self.assertIn("FakeBurger", result)
+        self.assertIn("SandwichCo", result)
+
+    def test_excludes_chains_without_macro_data(self):
+        result = fm_mod.chains(self.con)
+        self.assertNotIn("GhostChain", result,
+                         "Chains with no macro data must be excluded")
+
+    def test_no_duplicates(self):
+        result = fm_mod.chains(self.con)
+        self.assertEqual(result, sorted(set(result)))
+
+    def test_sorted_alphabetically(self):
+        result = fm_mod.chains(self.con)
+        self.assertEqual(result, sorted(result))
+
+    def test_empty_db_returns_empty_list(self):
+        tmp = tempfile.TemporaryDirectory()
+        empty_con = db.connect(Path(tmp.name) / "empty.db")
+        try:
+            result = fm_mod.chains(empty_con)
+            self.assertEqual(result, [])
+        finally:
+            empty_con.close()
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

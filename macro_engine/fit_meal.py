@@ -12,10 +12,39 @@ Never read the raw per-100g column as if it were a serving.
 """
 
 import itertools
+import re
 import sqlite3
 from typing import Optional
 
 from . import resolve, tracker
+
+# ---------------------------------------------------------------------------
+# Chain helpers (used by /api/chains and tests)
+# ---------------------------------------------------------------------------
+
+# Accepts names like "McDonald's", "7-Eleven", "A&W", "Tim Hortons".
+# Rejects empty strings, URLs, and strings over 60 chars.
+_CHAIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 '&.()\-]{0,58}$")
+
+
+def _titlecase(name: str) -> str:
+    """Title-case a chain name, keeping letters after apostrophes lower-case.
+
+    Examples::
+        "mcdonald's"  → "Mcdonald's"   (str.title() → "Mcdonald'S"; we fix it)
+        "TIM HORTONS" → "Tim Hortons"
+        "A&W"         → "A&W"           (non-letter chars left unchanged)
+    """
+    return re.sub(r"(?<=')\b[A-Z]", lambda m: m.group(0).lower(), name.title())
+
+
+def _looks_like_chain(brand: str) -> bool:
+    """Return True if *brand* looks like a restaurant / food-chain name.
+
+    The heuristic rejects empty strings, URLs, and oddly long/short values
+    while accepting names like "McDonald's", "7-Eleven", or "Tim Hortons".
+    """
+    return bool(brand and _CHAIN_RE.match(brand.strip()))
 
 # The four macros we budget against. fiber_g is informational only.
 _BUDGET_MACROS = ("kcal", "protein_g", "carb_g", "fat_g")
@@ -226,3 +255,31 @@ def fit_meal(
         "orders": top_orders,
         "over_budget": over_budget[:10],  # cap to keep response manageable
     }
+
+
+def chains(con: sqlite3.Connection, limit: int = 50) -> list[str]:
+    """Return the distinct restaurant / chain names stored in the DB.
+
+    Only brands that have at least one food with complete macro data are
+    returned (otherwise fit_meal has nothing to work with).  Results are
+    normalised with :func:`_titlecase` and sorted alphabetically.
+
+    Args:
+        con:   Open DB connection.
+        limit: Maximum number of distinct brands to return (default 50).
+
+    Returns:
+        Sorted list of chain names, e.g. ["A&W", "McDonald's", "Tim Hortons"].
+    """
+    rows = con.execute(
+        """SELECT DISTINCT f.brand
+           FROM foods f
+           JOIN food_nutrients n ON n.food_id = f.id
+           WHERE f.brand IS NOT NULL
+             AND f.brand != ''
+             AND n.kcal IS NOT NULL
+           ORDER BY f.brand
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return sorted(r["brand"] for r in rows if _looks_like_chain(r["brand"]))

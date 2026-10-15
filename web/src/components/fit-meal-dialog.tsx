@@ -6,12 +6,11 @@ import { Field } from "@/components/field"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  BottomSheet,
+  BottomSheetContent,
+  BottomSheetDescription,
+  BottomSheetTitle,
+} from "@/components/ui/bottom-sheet"
 import { Input } from "@/components/ui/input"
 import { formatGrams, formatKcal } from "@/lib/format"
 import type { Day, FitMacroBudget, FitMealResult, FitOrder } from "@/types"
@@ -128,7 +127,7 @@ function Stepper({
         <button
           type="button"
           aria-label={`Decrease ${label}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
           disabled={value <= min}
           onClick={() => onChange(Math.max(min, value - 1))}
         >
@@ -138,7 +137,7 @@ function Stepper({
         <button
           type="button"
           aria-label={`Increase ${label}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-mist disabled:opacity-40"
           disabled={value >= max}
           onClick={() => onChange(Math.min(max, value + 1))}
         >
@@ -164,7 +163,7 @@ export function FitMealDialog({
   const [chains, setChains] = useState<string[]>([])
   const [chainsError, setChainsError] = useState<string | null>(null)
 
-  // meals setting from server (loaded when dialog opens)
+  // meals setting from server (loaded when sheet opens)
   const [settingsMpd, setSettingsMpd] = useState(3)
 
   // form state
@@ -185,7 +184,7 @@ export function FitMealDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // fetch chains + settings when dialog opens
+  // fetch chains + settings when sheet opens
   useEffect(() => {
     if (!open) return
     setResult(null)
@@ -252,16 +251,43 @@ export function FitMealDialog({
 
   const remaining = day?.remaining
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Eating out?</DialogTitle>
-          <DialogDescription>
-            Find one meal that fits your macros — not the whole day.
-          </DialogDescription>
-        </DialogHeader>
+  // ── Results header (pinned when results are shown) ────────────────────────
+  const resultsHeader = result ? (
+    <div>
+      <BottomSheetTitle>{result.restaurant}</BottomSheetTitle>
+      {result.per_meal_target && (
+        <div className="mt-2 rounded-lg bg-mist px-3 py-2 text-xs tabular-nums text-muted-foreground">
+          <span className="font-medium text-foreground">Per-meal target</span>
+          {" ("}1 of {result.meals_left} meal{result.meals_left !== 1 ? "s" : ""} left{")"}:{" "}
+          {result.per_meal_target.kcal != null && <span className="mr-2">{formatKcal(result.per_meal_target.kcal)} kcal</span>}
+          {result.per_meal_target.protein_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.protein_g)} g protein</span>}
+          {result.per_meal_target.carb_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.carb_g)} g carbs</span>}
+          {result.per_meal_target.fat_g != null && <span>{formatGrams(result.per_meal_target.fat_g)} g fat</span>}
+        </div>
+      )}
+      {result.treats_excluded && (
+        <p className="mt-1 text-xs text-muted-foreground">Desserts &amp; shakes excluded</p>
+      )}
+    </div>
+  ) : undefined
 
+  // ── Form header ───────────────────────────────────────────────────────────
+  const formHeader = !result ? (
+    <div>
+      <BottomSheetTitle>Eating out?</BottomSheetTitle>
+      <BottomSheetDescription className="mt-1">
+        Find one meal that fits your macros — not the whole day.
+      </BottomSheetDescription>
+    </div>
+  ) : undefined
+
+  return (
+    <BottomSheet open={open} onOpenChange={onOpenChange}>
+      <BottomSheetContent
+        aria-label={result ? `${result.restaurant} fit-meal results` : "Eating out — find a meal that fits"}
+        header={result ? resultsHeader : formHeader}
+      >
+        {/* ── Form view ─────────────────────────────────────────────────── */}
         {!result && (
           <form
             className="grid gap-4"
@@ -437,6 +463,7 @@ export function FitMealDialog({
           </form>
         )}
 
+        {/* ── Results view ───────────────────────────────────────────────── */}
         {result && (
           <div className="space-y-4">
             {/* back button */}
@@ -447,24 +474,6 @@ export function FitMealDialog({
             >
               ← Back
             </button>
-
-            <div>
-              <h3 className="font-semibold">{result.restaurant}</h3>
-              {/* per-meal target (what one meal should eat) */}
-              {result.per_meal_target && (
-                <div className="mt-1.5 rounded-lg bg-mist px-3 py-2 text-xs tabular-nums text-muted-foreground">
-                  <span className="font-medium text-foreground">Per-meal target</span>
-                  {" ("}1 of {result.meals_left} meal{result.meals_left !== 1 ? "s" : ""} left{")"}:{" "}
-                  {result.per_meal_target.kcal != null && <span className="mr-2">{formatKcal(result.per_meal_target.kcal)} kcal</span>}
-                  {result.per_meal_target.protein_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.protein_g)} g protein</span>}
-                  {result.per_meal_target.carb_g != null && <span className="mr-2">{formatGrams(result.per_meal_target.carb_g)} g carbs</span>}
-                  {result.per_meal_target.fat_g != null && <span>{formatGrams(result.per_meal_target.fat_g)} g fat</span>}
-                </div>
-              )}
-              {result.treats_excluded && (
-                <p className="mt-1 text-xs text-muted-foreground">Desserts &amp; shakes excluded</p>
-              )}
-            </div>
 
             {result.note && (
               <div className="flex gap-2 rounded-lg bg-mist px-4 py-3 text-sm">
@@ -519,7 +528,7 @@ export function FitMealDialog({
             </Button>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </BottomSheetContent>
+    </BottomSheet>
   )
 }

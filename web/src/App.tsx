@@ -68,6 +68,11 @@ export default function App() {
   const [fitMealOpen, setFitMealOpen] = useState(false)
   const consumeSeed = useCallback(() => setSeed(null), [])
 
+  // When a new food is created while in week/month mode, switch to day view to log it
+  useEffect(() => {
+    if (seed && mode !== "day") setMode("day")
+  }, [seed, mode])
+
   const load = useCallback(async (next: string, range: Range) => {
     try {
       const [payload, weekPayload, monthPayload] = await Promise.all([
@@ -361,8 +366,7 @@ export default function App() {
         }}
       />
 
-      {/* When a new food is created while in week/month mode, switch to day view to log it */}
-      {mode !== "day" && seed && (() => { setMode("day"); return null })()}
+      {/* mode switch is handled in a useEffect below */}
     </div>
   )
 }

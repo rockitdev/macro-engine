@@ -11,7 +11,7 @@
 
 import { useState } from "react"
 
-import { addAlias, addFood, ApiError, logMeal } from "@/api"
+import { addAlias, addFood, ApiError, logMeal, searchFoods } from "@/api"
 import { formatKcal } from "@/lib/format"
 import { type Meal } from "@/lib/meals"
 import type { BarcodeFood } from "@/types"
@@ -73,38 +73,49 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
     setBusy(true)
     setError(null)
     try {
-      // 1. Ensure the food exists in the local DB (add_food is idempotent-ish
-      //    via the alias mechanism; the barcode itself acts as the alias key).
-      const created = await addFood({
-        name: food.name,
-        kcal: food.kcal ?? 0,
-        protein_g: food.protein_g ?? 0,
-        carb_g: food.carb_g ?? 0,
-        fat_g: food.fat_g ?? 0,
-        fiber_g: food.fiber_g,
-        brand: food.brand,
-        portion_label: food.portion_label,
-        portion_grams: food.portion_grams,
-        macros_are_per_portion: false, // macros are always per 100 g from OFF
-        alias: food.barcode,          // barcode → instant re-scan resolution
-      })
-
-      const foodId = created.food_id
-
-      // Save an alias for the barcode so re-scans resolve directly
-      try {
-        await addAlias({ phrase: food.barcode, food_id: foodId })
-      } catch {
-        /* non-fatal: duplicate alias is fine */
+      // 1. Check if barcode is already aliased to avoid creating duplicate food rows.
+      //    searchFoods resolves exact aliases first; a matched_alias hit means this
+      //    barcode is already registered — reuse the existing food_id.
+      let foodId: number | null = null
+      const existing = await searchFoods(food.barcode)
+      if (existing.length > 0 && existing[0].matched_alias) {
+        foodId = existing[0].id
       }
 
-      // 2. Log the entry
+      if (foodId == null) {
+        // No alias yet — create the food row and register the barcode as alias.
+        const created = await addFood({
+          name: food.name,
+          kcal: food.kcal ?? 0,
+          protein_g: food.protein_g ?? 0,
+          carb_g: food.carb_g ?? 0,
+          fat_g: food.fat_g ?? 0,
+          fiber_g: food.fiber_g,
+          brand: food.brand,
+          portion_label: food.portion_label,
+          portion_grams: food.portion_grams,
+          macros_are_per_portion: false, // macros are always per 100 g from OFF
+          alias: food.barcode,           // barcode → instant re-scan resolution
+        })
+        foodId = created.food_id
+
+        // Persist the alias so re-scans skip addFood entirely next time.
+        try {
+          await addAlias({ phrase: food.barcode, food_id: foodId })
+        } catch {
+          /* non-fatal: race-condition duplicate is fine */
+        }
+      }
+
+      // 2. Log the entry (foodId is always set by this point — either from the
+      //    alias hit or from addFood above; addFood throws on failure so we can't
+      //    reach here with a null)
       const grams = hasServing ? qtyNum * food.portion_grams! : qtyNum
       const result = await logMeal({
         date,
         meal,
         raw_text: `${food.name} (barcode ${food.barcode})`,
-        items: [{ food_id: foodId, grams }],
+        items: [{ food_id: foodId!, grams }],
       })
 
       if (result.problems.length > 0) {

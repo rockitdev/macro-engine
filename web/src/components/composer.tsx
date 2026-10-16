@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { addAlias, ApiError, getFood, logMeal, searchFoods } from "@/api"
+import { BarcodeFlow } from "@/components/barcode-flow"
 import { Checkbox } from "@/components/ui/checkbox"
 import { formatGrams, formatKcal } from "@/lib/format"
 import { MEALS, type Meal } from "@/lib/meals"
@@ -249,9 +250,22 @@ export function Composer({
 
   return (
     <>
-      {/* Title + meal tabs */}
+      {/* Title + scan button + meal tabs */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Log food</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Log food</h2>
+          <BarcodeFlow
+            date={date}
+            meal={meal}
+            onLogged={onLogged}
+            onFallback={(barcode) => {
+              setQuery(barcode)
+              setSelected(null)
+              setProblem(null)
+              setNotice(null)
+            }}
+          />
+        </div>
         <div role="group" aria-label="Meal" className="pill-nav" style={{ padding: 3 }}>
           {MEALS.map((m) => (
             <button

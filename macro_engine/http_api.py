@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, fit_meal as _fit_meal_mod, resolve, tracker
+from . import barcode as _barcode_mod, db, fit_meal as _fit_meal_mod, resolve, tracker
 from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -378,6 +378,22 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
                 meals_left_override=ml,
                 include_treats=include_treats,
             ))
+        return
+
+    # GET /api/barcode/<code>
+    # Queries Open Food Facts and returns normalised food data.
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "barcode"]:
+        code = parts[2]
+        if not code:
+            raise ValueError("barcode is required")
+        try:
+            result = _barcode_mod.lookup(code)
+        except Exception:
+            traceback.print_exc()
+            raise ApiError(502, "barcode lookup failed")
+        if result is None:
+            raise ApiError(404, "product not found")
+        _send_json(handler, 200, result)
         return
 
     if method == "GET" and not path.startswith("/api"):

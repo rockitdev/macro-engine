@@ -1,10 +1,16 @@
 """ETL for USDA FoodData Central bulk CSVs -> macros.db.
 
 Usage: .venv/bin/python -m macro_engine.etl_fdc [--datasets foundation sr_legacy survey]
+       .venv/bin/python -m macro_engine.etl_fdc --datasets branded   # large ~700K foods
 
 Downloads land in ~/.local/share/macro-engine/raw/ and are kept (re-runs skip
 the download). Food ids are stable across re-runs (upsert on source+source_id),
 so aliases and log history survive a reload. FTS is rebuilt at the end.
+
+Branded foods (--datasets branded) pull serving size from the FDC
+branded_food.csv columns (serving_size, serving_size_unit,
+household_serving_fulltext) and store them in the portions table so the UI
+can show per-serving calorie figures as the primary display.
 """
 
 import argparse
@@ -33,7 +39,23 @@ DATASETS = {
         "source": "fdc_survey",
         "data_types": {"survey_fndds_food"},
     },
+    # Branded foods (~700 K items). NOT in the default --datasets list; load
+    # explicitly with --datasets branded.  Serving info comes from
+    # branded_food.csv (serving_size / serving_size_unit /
+    # household_serving_fulltext) rather than food_portion.csv.
+    "branded": {
+        "zip": "FoodData_Central_branded_food_csv_2024-10-31.zip",
+        "source": "fdc_branded",
+        "data_types": {"branded_food"},
+    },
 }
+
+# Default datasets loaded when --datasets is not specified (excludes branded
+# because it is very large and requires a separate explicit opt-in).
+DEFAULT_DATASETS = ["foundation", "sr_legacy", "survey"]
+
+# serving_size_unit values from branded_food.csv that map directly to grams.
+_GRAM_UNITS = {"g", "grm", "grams", "gram"}
 
 # nutrient_nbr -> our column. kcal preference: 208, else Atwater specific 958,
 # else Atwater general 957 (Foundation foods often lack 208).
@@ -163,6 +185,38 @@ def load_dataset(con, name: str, raw_dir: Path) -> int:
             if desc:
                 portions.setdefault(fdc_id, []).append((desc, grams))
 
+    # For the branded dataset, serving data comes from branded_food.csv rather
+    # than food_portion.csv.  We also capture brand_owner/brand_name for the
+    # foods.brand column so search shows e.g. "Grenade" instead of the source.
+    branded_meta: dict[str, dict] = {}
+    bf = folder / "branded_food.csv"
+    if bf.exists():
+        for row in _read_csv(bf):
+            fdc_id = row.get("fdc_id", "")
+            if fdc_id not in wanted_ids:
+                continue
+            # Brand: prefer brand_name, fall back to brand_owner
+            brand = (row.get("brand_name") or row.get("brand_owner") or "").strip() or None
+            # Serving size: only use when unit is a gram-equivalent
+            serving_unit = (row.get("serving_size_unit") or "").strip().lower()
+            serving_g: float | None = None
+            if serving_unit in _GRAM_UNITS:
+                try:
+                    serving_g = float(row.get("serving_size") or "")
+                except (ValueError, TypeError):
+                    serving_g = None
+            # Household label (e.g. "1 bar", "2 cookies")
+            household = (row.get("household_serving_fulltext") or "").strip() or None
+            branded_meta[fdc_id] = {
+                "brand": brand,
+                "serving_g": serving_g,
+                "household": household,
+            }
+            # Build portion from household label + gram weight
+            if serving_g and serving_g > 0:
+                label = household if household else f"{serving_g:g} g"
+                portions.setdefault(fdc_id, []).insert(0, (label, serving_g))
+
     count = 0
     for row in _read_csv(folder / "food.csv"):
         if row.get("data_type") not in cfg["data_types"]:
@@ -172,12 +226,14 @@ def load_dataset(con, name: str, raw_dir: Path) -> int:
         kcal = next((n[f"kcal:{nbr}"] for nbr in KCAL_NBRS if f"kcal:{nbr}" in n), None)
         if kcal is None and not any(k in n for k in ("protein_g", "fat_g", "carb_g")):
             continue  # nothing useful
+        brand = branded_meta.get(fdc_id, {}).get("brand")
         food_id = con.execute(
             """INSERT INTO foods (name, brand, source, source_id)
-               VALUES (?, NULL, ?, ?)
-               ON CONFLICT(source, source_id) DO UPDATE SET name = excluded.name
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(source, source_id) DO UPDATE
+                 SET name = excluded.name, brand = excluded.brand
                RETURNING id""",
-            (row["description"].strip(), cfg["source"], fdc_id),
+            (row["description"].strip(), brand, cfg["source"], fdc_id),
         ).fetchone()[0]
         con.execute(
             """INSERT OR REPLACE INTO food_nutrients
@@ -201,7 +257,7 @@ def load_dataset(con, name: str, raw_dir: Path) -> int:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--datasets", nargs="+", default=list(DATASETS),
+    ap.add_argument("--datasets", nargs="+", default=DEFAULT_DATASETS,
                     choices=list(DATASETS))
     ap.add_argument("--db", default=None)
     ap.add_argument("--raw-dir", default=None)

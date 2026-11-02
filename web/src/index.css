@@ -169,7 +169,7 @@
     grid-template-columns: 1fr !important;
   }
   .day-view-grid > aside {
-    order: -1; /* week sidebar above on mobile */
+    order: 1; /* week sidebar below daily content on mobile — daily ring+macros+log are primary */
   }
 }
 

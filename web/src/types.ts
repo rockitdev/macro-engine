@@ -213,3 +213,113 @@ export type NewFood = {
   macros_are_per_portion?: boolean
   alias?: string | null
 }
+
+// ── Coaching ────────────────────────────────────────────────────────────────
+
+export type Activity = "sedentary" | "light" | "moderate" | "very" | "extra"
+
+export type Profile = {
+  sex: "male" | "female" | null
+  birth_year: number | null
+  height_cm: number | null
+  activity: Activity
+  resistance_training: boolean
+  carb_share: number
+  adjust_with_activity: boolean
+  units: "kg" | "lb"
+}
+
+export type WeekTrend = {
+  start: string
+  end: string
+  n: number
+  avg_kg: number | null
+  avg_lb: number | null
+  change_kg: number | null
+  change_pct: number | null
+  waist_cm: number | null
+  hips_cm: number | null
+  body_fat_pct: number | null
+}
+
+export type MacroTargets = {
+  kcal: number
+  protein_g: number
+  carb_g: number
+  fat_g: number
+  fiber_g: number | null
+}
+
+export type Phase = {
+  id: number
+  kind: "cut" | "maintenance" | "reverse" | "diet_break"
+  start_date: string
+  week_number: number
+  params: Record<string, unknown> & { rate_pct?: number; pace?: string }
+}
+
+export type Measured = {
+  kcal: number | null
+  confidence: "none" | "low" | "medium" | "high"
+  reason?: string
+  avg_intake_kcal?: number
+  rate_kg_per_week?: number
+  logging_coverage?: number
+}
+
+export type Predicted = { bmr: number; equation: string; kcal: number } | null
+
+export type Adherence = {
+  days: number
+  logged_days: number
+  logging_coverage: number
+  kcal_compliance: number | null
+  protein_compliance: number | null
+  weekend_drift_kcal?: number
+}
+
+export type CheckIn = {
+  date: string
+  status: string
+  action: string
+  reasons: string[]
+  advice: string[]
+  proposed_targets: MacroTargets | null
+  adjust_pct: number | null
+  activity_pct: number | null
+  applied: boolean
+  this_week?: { avg_kg: number; change_kg: number; change_pct: number }
+  goal_loss_kg?: number
+  loss_kg?: number
+}
+
+export type Progress = {
+  date: string
+  profile: Profile
+  body: {
+    weight_kg: number | null
+    body_fat_pct: number | null
+    lbm_kg: number | null
+    bmi: number | null
+    missing: string[]
+  }
+  phase: Phase | null
+  targets: Targets | null
+  weeks: WeekTrend[]
+  daily: { date: string; weight_kg: number | null; body_fat_pct: number | null; waist_cm: number | null }[]
+  maintenance: { measured: Measured; predicted: Predicted; vs_predicted_pct: number | null; gate?: string }
+  adherence_14d: Adherence
+  phase_change_kg?: number
+  last_checkin: (CheckIn & { payload: { reasons: string[] } }) | null
+}
+
+export type Plan = {
+  goal: string
+  targets: MacroTargets
+  maintenance: { kcal: number; source: string }
+  deficit?: { rate_pct: number; kg_per_week: number; kcal_per_day: number }
+  protein_basis: string
+  timeline?: { diet_weeks: number; end_weight_kg: number }
+  warnings: string[]
+  notes: string[]
+}

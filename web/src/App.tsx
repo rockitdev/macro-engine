@@ -5,13 +5,14 @@ import { DayView } from "@/components/day-view"
 import { FitMealDialog } from "@/components/fit-meal-dialog"
 import { FoodDialog } from "@/components/food-dialog"
 import { MonthView } from "@/components/month-view"
+import { ProgressView } from "@/components/progress-view"
 import { TargetsDialog } from "@/components/targets-dialog"
 import { WeekView } from "@/components/week-view"
 import { formatLong, formatMonth, formatSpan, isoToday, shiftDate, shiftMonth } from "@/lib/format"
 import { defaultMeal, type Meal } from "@/lib/meals"
 import type { Day, Food, Month, Week } from "@/types"
 
-type Range = "day" | "week" | "month"
+type Range = "day" | "week" | "month" | "progress"
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 function LeafIcon() {
@@ -54,7 +55,8 @@ function PlusIcon() {
 export default function App() {
   const today = isoToday()
   const [date, setDate] = useState(today)
-  const [mode, setMode] = useState<Range>("day")
+  const [mode, setMode] = useState<Range>(() =>
+    (["day", "week", "month", "progress"] as const).find((r) => `#${r}` === window.location.hash) ?? "day")
   const [day, setDay] = useState<Day | null>(null)
   const [week, setWeek] = useState<Week | null>(null)
   const [month, setMonth] = useState<Month | null>(null)
@@ -67,6 +69,11 @@ export default function App() {
   const [meal, setMeal] = useState<Meal>(defaultMeal)
   const [fitMealOpen, setFitMealOpen] = useState(false)
   const consumeSeed = useCallback(() => setSeed(null), [])
+
+  // Keep the range in the URL hash so views are linkable (#progress).
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${mode}`)
+  }, [mode])
 
   // When a new food is created while in week/month mode, switch to day view to log it
   useEffect(() => {
@@ -112,6 +119,7 @@ export default function App() {
   const ready =
     mode === "day" ? day?.date === date
     : mode === "week" ? week?.focus === date
+    : mode === "progress" ? true
     : month?.focus === date
 
   const rangeLabel =
@@ -140,7 +148,7 @@ export default function App() {
   function step(direction: number) {
     setDate((current) =>
       mode === "month" ? shiftMonth(current, direction)
-      : shiftDate(current, mode === "week" ? direction * 7 : direction),
+      : shiftDate(current, mode === "week" || mode === "progress" ? direction * 7 : direction),
     )
   }
 
@@ -198,7 +206,7 @@ export default function App() {
 
           {/* Range nav */}
           <nav aria-label="Range" className="pill-nav" style={{ marginLeft: 12 }}>
-            {(["day", "week", "month"] as const).map((id) => (
+            {(["day", "week", "month", "progress"] as const).map((id) => (
               <button
                 key={id}
                 type="button"
@@ -206,7 +214,7 @@ export default function App() {
                 aria-selected={mode === id}
                 onClick={() => setMode(id)}
               >
-                {id === "day" ? "Day" : id === "week" ? "Week" : "Month"}
+                {id === "day" ? "Day" : id === "week" ? "Week" : id === "month" ? "Month" : "Progress"}
               </button>
             ))}
           </nav>
@@ -333,6 +341,11 @@ export default function App() {
             onSelect={openDay}
             onWeekStart={saveWeekStart}
           />
+        )}
+
+        {/* ── Progress (coaching) view ── */}
+        {mode === "progress" && (
+          <ProgressView date={date} onTargetsChanged={() => void load(date, mode)} />
         )}
 
         {!ready && !error && (

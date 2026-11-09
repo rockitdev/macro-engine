@@ -21,7 +21,7 @@ services:
     ports:
       # Bind loopback + LAN only — never 0.0.0.0 (shadows tailscale TLS listener)
       - "127.0.0.1:4325:5173"
-      - "192.168.1.38:4325:5173"
+      - "192.168.1.60:4325:5173"
     environment:
       # Proxy target when running inside Docker — service name resolves on the compose network
       VITE_API_TARGET: http://api:8787

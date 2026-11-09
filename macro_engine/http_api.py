@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import db, fit_meal as _fit_meal_mod, resolve, tracker
+from . import coach, db, fit_meal as _fit_meal_mod, resolve, tracker
 from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -273,6 +273,87 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
                 body.get("effective_date"),
             )
         _send_json(handler, 200, saved)
+        return
+
+    # ── Coaching ──
+    if method == "GET" and path == "/api/profile":
+        with _connect() as con:
+            _send_json(handler, 200, coach.get_profile(con))
+        return
+
+    if method == "POST" and path == "/api/profile":
+        body = _read_body(handler)
+        with _connect() as con:
+            _send_json(handler, 200, coach.set_profile(con, **body))
+        return
+
+    if method == "POST" and path == "/api/metrics":
+        body = _read_body(handler)
+        allowed = {"date", "weight", "unit", "body_fat_pct", "waist", "hips", "length_unit", "note"}
+        extra = set(body) - allowed
+        if extra:
+            raise ValueError("unknown fields: " + ", ".join(sorted(extra)))
+        date = body.pop("date", None)
+        with _connect() as con:
+            _send_json(handler, 200, coach.log_metrics(con, date, **body))
+        return
+
+    if method == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "metrics"]:
+        with _connect() as con:
+            deleted = coach.delete_metrics(con, parts[2])
+        if not deleted:
+            raise ApiError(404, f"no metrics on {parts[2]}")
+        _send_json(handler, 200, {"deleted": True, "date": parts[2]})
+        return
+
+    if method == "GET" and path == "/api/progress":
+        with _connect() as con:
+            _send_json(handler, 200, coach.progress(con, _query_date(qs)))
+        return
+
+    if method == "POST" and path == "/api/plan":
+        body = _read_body(handler)
+        allowed = {"goal", "rate_pct", "carb_share", "maintenance_kcal", "target_body_fat_pct",
+                   "date", "apply", "diet_weeks", "break_weeks", "pace"}
+        extra = set(body) - allowed
+        if extra:
+            raise ValueError("unknown fields: " + ", ".join(sorted(extra)))
+        goal = body.pop("goal", "cut")
+        body["apply"] = bool(body.get("apply", False))
+        with _connect() as con:
+            _send_json(handler, 200, coach.plan_targets(con, goal, **body))
+        return
+
+    if method == "POST" and path == "/api/checkin":
+        body = _read_body(handler)
+        flags = body.get("flags") or {}
+        if not isinstance(flags, dict):
+            raise ValueError("flags must be an object")
+        with _connect() as con:
+            _send_json(handler, 200, coach.check_in(
+                con, body.get("date"), flags=flags, scores=body.get("scores"),
+                apply=bool(body.get("apply", False)), effective_date=body.get("effective_date")))
+        return
+
+    if method == "GET" and path == "/api/checkins":
+        with _connect() as con:
+            _send_json(handler, 200, coach.checkin_history(con, _query_limit(qs)))
+        return
+
+    if method == "POST" and path == "/api/phase":
+        body = _read_body(handler)
+        _missing(body, "kind")
+        kind = body.pop("kind")
+        start = body.pop("start_date", None)
+        with _connect() as con:
+            _send_json(handler, 200, coach.start_phase(con, kind, start, **body))
+        return
+
+    if method == "POST" and path == "/api/high-days":
+        body = _read_body(handler)
+        with _connect() as con:
+            _send_json(handler, 200, coach.plan_high_days(
+                con, body.get("high_days", 2), body.get("high_kcal"), body.get("date")))
         return
 
     if method == "GET" and path == "/api/chains":

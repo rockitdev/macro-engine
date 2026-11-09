@@ -99,6 +99,46 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS food_fts USING fts5(name, brand, store, content='', tokenize='porter unicode61');
+
+-- One row per day: morning weigh-in plus optional body-composition checks.
+-- Always metric (kg / cm); the boundary converts lb / in.
+CREATE TABLE IF NOT EXISTS body_metrics (
+    date          TEXT PRIMARY KEY,
+    weight_kg     REAL,
+    body_fat_pct  REAL,
+    waist_cm      REAL,
+    hips_cm       REAL,
+    note          TEXT,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Diet phases (cut | maintenance | reverse | diet_break). The latest phase
+-- starting at or before a date is the active one. params is JSON.
+CREATE TABLE IF NOT EXISTS phases (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    start_date  TEXT NOT NULL,
+    params      TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Weekly check-ins: what the coach saw, what it recommended, and whether the
+-- change was applied. Applied carb/fat adjustments are how the coach learns
+-- the user's personal plateau-breaking threshold.
+CREATE TABLE IF NOT EXISTS checkins (
+    id             INTEGER PRIMARY KEY,
+    date           TEXT NOT NULL,
+    week_start     TEXT,
+    phase_id       INTEGER,
+    status         TEXT NOT NULL,
+    action         TEXT NOT NULL,
+    adjust_pct     REAL,
+    activity_pct   REAL,
+    applied        INTEGER NOT NULL DEFAULT 0,
+    payload        TEXT NOT NULL DEFAULT '{}',
+    created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(date);
 """
 
 

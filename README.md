@@ -9,7 +9,7 @@ meals in plain language and answer the only question that matters:
 ## Setup
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install mcp
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m macro_engine.etl_fdc          # download + load USDA data (~15k foods)
 .venv/bin/python -m unittest discover tests -v    # run tests
 ```

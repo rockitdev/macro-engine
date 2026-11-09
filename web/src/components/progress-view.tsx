@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { ApiError, checkIn, getProgress, logMetrics, planTargets, saveProfile } from "@/api"
+import { ActivityCard } from "@/components/activity-card"
 import { Field } from "@/components/field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -283,6 +284,14 @@ function CheckInCard({ progress, onApplied }: { progress: Progress; onApplied: (
           <ul className="grid gap-2 text-sm">
             {[...result.reasons, ...result.advice].map((r) => <li key={r}>{r}</li>)}
           </ul>
+          {result.activity && result.activity.notes.length > 0 && (
+            <div className="text-sm">
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Activity context</p>
+              <ul className="mt-1 grid gap-1">
+                {result.activity.notes.map((note) => <li key={note}>{note}</li>)}
+              </ul>
+            </div>
+          )}
           {result.proposed_targets && (
             <div className="rounded-lg bg-mist p-3">
               <p className="mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -307,27 +316,61 @@ function CheckInCard({ progress, onApplied }: { progress: Progress; onApplied: (
 function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () => void }) {
   const p = progress.profile
   const [sex, setSex] = useState(p.sex ?? "")
-  const [age, setAge] = useState(() => (p.birth_year ? String(new Date().getFullYear() - p.birth_year) : ""))
+  const [birthDate, setBirthDate] = useState(p.birth_date ?? "")
   const [height, setHeight] = useState(p.height_cm ? String(p.units === "lb" ? Math.round(p.height_cm / 2.54) : p.height_cm) : "")
   const [activity, setActivity] = useState<Activity>(p.activity)
   const [units, setUnits] = useState(p.units)
-  const [goal, setGoal] = useState<"cut" | "maintain" | "reverse">("cut")
+  const [dailyActivity, setDailyActivity] = useState(p.daily_activity ?? "")
+  const [training, setTraining] = useState(p.resistance_training)
+  const [trainingDays, setTrainingDays] = useState(p.strength_days_per_week == null ? "" : String(p.strength_days_per_week))
+  const [trainingMinutes, setTrainingMinutes] = useState(p.strength_minutes_per_session == null ? "" : String(p.strength_minutes_per_session))
+  const [lossGoal, setLossGoal] = useState(p.goal_loss_kg == null ? "" : String(Number((p.goal_loss_kg * (p.units === "lb" ? LB : 1)).toFixed(1))))
+  const [goal, setGoal] = useState<"cut" | "maintain" | "reverse">(p.goal ?? "cut")
   const [rate, setRate] = useState("0.6")
   const [plan, setPlan] = useState<Plan | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  function profileFields(): Parameters<typeof saveProfile>[0] {
+    return {
+      sex: (sex || undefined) as "male" | "female" | undefined,
+      birth_date: birthDate,
+      ...(units === "lb" ? { height_in: height ? Number(height) : undefined } : { height_cm: height ? Number(height) : undefined }),
+      activity, units, daily_activity: dailyActivity as Parameters<typeof saveProfile>[0]["daily_activity"],
+      resistance_training: training,
+      strength_days_per_week: trainingDays === "" ? "" : Number(trainingDays),
+      strength_minutes_per_session: trainingMinutes === "" ? "" : Number(trainingMinutes),
+      goal, goal_loss_kg: lossGoal === "" ? "" : Number(lossGoal) / (units === "lb" ? LB : 1),
+    }
+  }
+
+  function changeUnits(next: "kg" | "lb") {
+    if (next === units) return
+    if (height) setHeight(String(Number((Number(height) * (next === "lb" ? 1 / 2.54 : 2.54)).toFixed(1))))
+    if (lossGoal) setLossGoal(String(Number((Number(lossGoal) * (next === "lb" ? LB : 1 / LB)).toFixed(3))))
+    setUnits(next)
+  }
+
+  async function saveOnly() {
+    setBusy(true); setError(null); setMessage(null)
+    try {
+      await saveProfile(profileFields())
+      setMessage("Profile saved. Your current macro targets are unchanged.")
+      onApplied()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save profile")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function go(apply: boolean) {
     setBusy(true)
     setError(null)
+    setMessage(null)
     try {
-      await saveProfile({
-        sex: (sex || undefined) as "male" | "female" | undefined,
-        age: age ? Number(age) : undefined,
-        ...(units === "lb" ? { height_in: height ? Number(height) : undefined } : { height_cm: height ? Number(height) : undefined }),
-        activity,
-        units,
-      } as Parameters<typeof saveProfile>[0])
+      await saveProfile(profileFields())
       const out = await planTargets({ goal, rate_pct: goal === "cut" ? Number(rate) : undefined, date: progress.date, apply })
       setPlan(out)
       if (apply) onApplied()
@@ -341,20 +384,21 @@ function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () 
   const select = "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
 
   return (
-    <Card title="Set targets from your body">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <Card title="Profile and goals">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" onChange={() => { setPlan(null); setMessage(null) }}>
         <Field id="su-sex" label="Sex">
           <select id="su-sex" className={select} value={sex} onChange={(e) => setSex(e.target.value)}>
             <option value="">—</option><option value="male">Male</option><option value="female">Female</option>
           </select>
         </Field>
-        <Field id="su-age" label="Age">
-          <Input id="su-age" inputMode="numeric" value={age} onChange={(e) => setAge(e.target.value)} />
+        <Field id="su-birth-date" label="Date of birth">
+          <Input id="su-birth-date" type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+          {!birthDate && p.birth_year && <p className="mt-1 text-xs text-muted-foreground">Birth year on file: {p.birth_year}. Add a date for an exact age.</p>}
         </Field>
         <Field id="su-height" label={`Height (${units === "lb" ? "in" : "cm"})`}>
           <Input id="su-height" inputMode="decimal" value={height} onChange={(e) => setHeight(e.target.value)} />
         </Field>
-        <Field id="su-activity" label="Activity">
+        <Field id="su-activity" label="Overall activity (includes workouts)">
           <select id="su-activity" className={select} value={activity} onChange={(e) => setActivity(e.target.value as Activity)}>
             <option value="sedentary">Sedentary</option>
             <option value="light">Light</option>
@@ -363,10 +407,34 @@ function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () 
             <option value="extra">Extra active</option>
           </select>
         </Field>
+        <Field id="su-daily-activity" label="Outside workouts">
+          <select id="su-daily-activity" className={select} value={dailyActivity} onChange={(e) => setDailyActivity(e.target.value as typeof dailyActivity)}>
+            <option value="">Not recorded</option>
+            <option value="seated">Mostly seated / desk work</option>
+            <option value="on_feet">On my feet much of the day</option>
+            <option value="physical">Physically demanding work</option>
+          </select>
+        </Field>
+        <Field id="su-training" label="Strength training">
+          <label className="flex h-9 items-center gap-2 text-sm">
+            <input id="su-training" type="checkbox" checked={training} onChange={(e) => setTraining(e.target.checked)} />
+            I strength train
+          </label>
+        </Field>
+        <Field id="su-training-days" label="Strength sessions (days/week)">
+          <Input id="su-training-days" type="number" min="0" max="7" step="1" value={trainingDays} onChange={(e) => setTrainingDays(e.target.value)} />
+        </Field>
+        <Field id="su-training-minutes" label="Strength training (minutes/session)">
+          <Input id="su-training-minutes" type="number" min="0" max="480" step="1" value={trainingMinutes} onChange={(e) => setTrainingMinutes(e.target.value)} />
+        </Field>
         <Field id="su-units" label="Units">
-          <select id="su-units" className={select} value={units} onChange={(e) => setUnits(e.target.value as "kg" | "lb")}>
+          <select id="su-units" className={select} value={units} onChange={(e) => changeUnits(e.target.value as "kg" | "lb")}>
             <option value="kg">kg / cm</option><option value="lb">lb / in</option>
           </select>
+        </Field>
+        <Field id="su-loss-goal" label={`Long-term loss goal (${units}, optional)`}>
+          <Input id="su-loss-goal" type="number" min="0" step="any" value={lossGoal} onChange={(e) => setLossGoal(e.target.value)} />
+          <p className="mt-1 text-xs text-muted-foreground">An approximate aim you can revisit as you progress.</p>
         </Field>
         <Field id="su-goal" label="Goal">
           <select id="su-goal" className={select} value={goal} onChange={(e) => setGoal(e.target.value as typeof goal)}>
@@ -386,10 +454,13 @@ function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () 
           </Field>
         )}
       </div>
-      <div className="mt-4 flex gap-2">
+      <p className="mt-3 text-xs text-muted-foreground">Overall activity includes your workouts. The training schedule records your routine without adding exercise calories again.</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" disabled={busy} onClick={() => void saveOnly()}>Save profile</Button>
         <Button type="button" variant="outline" disabled={busy} onClick={() => void go(false)}>Preview</Button>
         {plan && <Button type="button" disabled={busy} onClick={() => void go(true)}>Use these targets</Button>}
       </div>
+      {message && <p className="mt-3 text-sm text-muted-foreground" role="status">{message}</p>}
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
       {plan && (
         <div className="mt-4 grid gap-2 text-sm">
@@ -439,6 +510,12 @@ export function ProgressView({ date, onTargetsChanged }: { date: string; onTarge
       </Card>
       <Card title="Weigh-in">
         <WeighIn date={date} units={u} onSaved={reload} />
+        {progress.apple_health_sync && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Apple Health last received: {new Date(progress.apple_health_sync.last_sync_at).toLocaleString()}
+            {progress.apple_health_sync.preserved_manual_fields > 0 && " · Manual entries preserved"}
+          </p>
+        )}
       </Card>
 
       <Card title="This week">
@@ -502,6 +579,11 @@ export function ProgressView({ date, onTargetsChanged }: { date: string; onTarge
       <div className="lg:col-span-2">
         <CheckInCard progress={progress} onApplied={() => { reload(); onTargetsChanged() }} />
       </div>
+      {progress.activity && (
+        <div className="lg:col-span-3">
+          <ActivityCard activity={progress.activity} date={date} onChanged={reload} />
+        </div>
+      )}
       <div className={needsSetup ? "lg:col-span-3 lg:order-first" : "lg:col-span-3"}>
         <SetupCard progress={progress} onApplied={() => { reload(); onTargetsChanged() }} />
       </div>

@@ -159,6 +159,55 @@ class CoachDBTest(unittest.TestCase):
         self.assertAlmostEqual(p["height_cm"], 177.8)
         self.assertAlmostEqual(p["carb_share"], 0.55)
 
+    def test_full_birth_date_tracks_birthday_and_preserves_legacy_profiles(self):
+        self.assertEqual(coach._age({"birth_year": 1981}, "2026-11-09"), 45)
+        p = coach.set_profile(self.con, birth_date="1981-11-10")
+        self.assertEqual(p["birth_year"], 1981)
+        self.assertEqual(coach._age(p, "2026-11-09"), 44)
+        self.assertEqual(coach._age(p, "2026-11-10"), 45)
+        self.assertEqual(coach._age(p, "2027-11-09"), 45)
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            coach.set_profile(self.con, birth_year=1982)
+        self.assertEqual(coach.get_profile(self.con)["birth_date"], "1981-11-10")
+        with self.assertRaises(ValueError):
+            coach.set_profile(self.con, birth_date="1981-02-30")
+        with self.assertRaises(ValueError):
+            coach.set_profile(self.con, birth_date="2999-01-01")
+        # Correcting a complete date updates the approximate legacy year too.
+        p = coach.set_profile(self.con, birth_date="1982-11-10")
+        self.assertEqual(p["birth_year"], 1982)
+
+    def test_profile_schedule_and_goal_merge_without_changing_targets(self):
+        tracker.set_targets(self.con, 3000, 240, 300, 93, effective_date="2026-01-01")
+        before = tracker.get_targets(self.con, "2026-11-09")
+        p = coach.set_profile(self.con, birth_date="1981-11-10", height_in=72,
+                              daily_activity="seated", strength_days_per_week=6,
+                              strength_minutes_per_session=45, goal="cut", goal_loss_lb=100)
+        self.assertAlmostEqual(p["height_cm"], 182.9)
+        self.assertAlmostEqual(p["goal_loss_kg"] * coach.LB_PER_KG, 100, places=2)
+        p = coach.set_profile(self.con, units="lb")
+        self.assertEqual(p["strength_days_per_week"], 6)
+        self.assertEqual(p["strength_minutes_per_session"], 45)
+        self.assertEqual(p["daily_activity"], "seated")
+        self.assertEqual(tracker.get_targets(self.con, "2026-11-09"), before)
+        self.assertIsNone(coach.current_phase(self.con, "2026-11-09"))
+        p = coach.set_profile(self.con, goal_loss_kg="", strength_minutes_per_session="")
+        self.assertIsNone(p["goal_loss_kg"])
+        self.assertIsNone(p["strength_minutes_per_session"])
+        self.assertEqual(p["strength_days_per_week"], 6)
+
+    def test_profile_rejects_invalid_schedule_and_goals_atomically(self):
+        before = coach.get_profile(self.con)
+        for fields in [dict(strength_days_per_week=8), dict(strength_days_per_week=2.5),
+                       dict(strength_days_per_week=True), dict(strength_minutes_per_session=-1),
+                       dict(strength_minutes_per_session=481), dict(goal_loss_kg=-10),
+                       dict(goal_loss_kg=float("nan")), dict(goal_loss_kg=301),
+                       dict(goal_loss_lb=100, goal_loss_kg=45), dict(daily_activity="unknown"),
+                       dict(goal="crash")]:
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                coach.set_profile(self.con, height_cm=190, **fields)
+            self.assertEqual(coach.get_profile(self.con), before)
+
     # ── maintenance ──
     def test_empirical_maintenance_from_loss(self):
         # 2400 kcal/day, losing 0.5 kg/week -> maintenance ~ 2400 + 0.5 * factor

@@ -221,9 +221,15 @@ export type Activity = "sedentary" | "light" | "moderate" | "very" | "extra"
 export type Profile = {
   sex: "male" | "female" | null
   birth_year: number | null
+  birth_date: string | null
   height_cm: number | null
   activity: Activity
   resistance_training: boolean
+  daily_activity: "seated" | "on_feet" | "physical" | null
+  strength_days_per_week: number | null
+  strength_minutes_per_session: number | null
+  goal: "cut" | "maintain" | "reverse" | null
+  goal_loss_kg: number | null
   carb_share: number
   adjust_with_activity: boolean
   units: "kg" | "lb"
@@ -291,9 +297,114 @@ export type CheckIn = {
   this_week?: { avg_kg: number; change_kg: number; change_pct: number }
   goal_loss_kg?: number
   loss_kg?: number
+  activity?: { notes: string[]; note: string }
+}
+
+export type WorkoutCategory = "strength" | "cardio" | "other"
+
+export type Workout = {
+  id: number
+  identity_basis: "external" | "derived" | "manual"
+  external_id: string | null
+  source: string
+  type: string
+  category: WorkoutCategory
+  local_date: string
+  start_at: string | null
+  end_at: string | null
+  duration_seconds: number
+  duration_basis: "recorded" | "elapsed" | "manual"
+  minutes: number
+  note: string | null
+  captured_at: string | null
+  received_at: string
+  updated_at: string
+}
+
+export type ActivityDay = {
+  date: string
+  partial: boolean
+  future: boolean
+  steps: number | null
+  steps_captured_at: string | null
+  steps_queried: boolean
+  resting_hr_bpm: number | null
+  resting_hr_sample_at: string | null
+  workouts: number
+}
+
+export type ActivityWeek = {
+  start: string
+  end: string
+  closed_days: number
+  steps_observed_days: number
+  steps_avg: number | null
+  steps_queried_days: number
+  resting_hr_avg: number | null
+  resting_hr_days: number
+  workouts: Record<WorkoutCategory, { count: number; minutes: number }>
+  workout_days: number
+  duration_bases: string[]
+  manual_workouts: number
+}
+
+export type DateRange = { start: string; end: string; days: number }
+
+export type ActivityFreshness = {
+  last_query_captured_at: string | null
+  last_query_received_at: string | null
+  last_attempt_status: string | null
+  last_observation_date: string | null
+  last_observation_saved_at: string | null
+}
+
+export type ActivitySync = {
+  mode: "normal" | "catch_up"
+  window_days: number
+  today: string
+  timezone: string
+  catch_up: DateRange[]
+  backlog_beyond_limit: DateRange[]
+  backlog_note: string | null
+  last_request: {
+    received_at: string
+    captured_at: string
+    outcome: "updated" | "no_new_readings" | "partial"
+    notice: string
+    partial_reasons: string[]
+    observations_saved: number
+    warnings: string[]
+  } | null
+}
+
+export type ActivitySummary = {
+  date: string
+  today: string
+  timezone: string
+  timezone_note: string
+  source: {
+    selected: string | null
+    selection: "auto" | "user" | null
+    policy: string
+    label: string
+    seen: { source: string; days: number; last_date: string }[]
+    history: { source: string; selection: string; at: string; previous: string | null }[]
+  }
+  today_steps: { date: string; value: number; so_far: true; captured_at: string } | null
+  days: ActivityDay[]
+  weeks: ActivityWeek[]
+  workouts: Workout[]
+  plan: { strength_days_per_week: number | null; strength_minutes_per_session: number | null }
+  freshness: Record<"steps" | "resting_heart_rate" | "workouts", ActivityFreshness>
+  sync: ActivitySync
+  capabilities: { steps: string; resting_heart_rate: string; workouts: string; workouts_note: string }
+  manual_workout_types: string[]
+  notes: string[]
 }
 
 export type Progress = {
+  activity: ActivitySummary
+  apple_health_sync?: { last_sync_at: string; preserved_manual_fields: number } | null
   date: string
   profile: Profile
   body: {

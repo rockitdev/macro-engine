@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -88,6 +89,103 @@ class HttpApiTest(unittest.TestCase):
         status, body, _ = self.req("GET", "/api/health")
         self.assertEqual(status, 200)
         self.assertEqual(body, {"ok": True})
+
+    def test_profile_captures_birth_date_training_and_loss_goal(self):
+        status, profile, _ = self.req("POST", "/api/profile", {
+            "sex": "male", "birth_date": "1981-11-10", "height_in": 72,
+            "daily_activity": "seated", "activity": "moderate", "resistance_training": True,
+            "strength_days_per_week": 6, "strength_minutes_per_session": 45,
+            "goal": "cut", "goal_loss_lb": 100, "units": "lb",
+        })
+        self.assertEqual(status, 200)
+        _, saved, _ = self.req("GET", "/api/profile")
+        self.assertEqual(saved, profile)
+        _, progress, _ = self.req("GET", "/api/progress?date=2026-11-09")
+        self.assertEqual(progress["body"]["age"], 44)
+        self.assertIsNone(progress["targets"])
+        self.assertIsNone(progress["phase"])
+        self.assertEqual(progress["profile"]["strength_days_per_week"], 6)
+        self.assertEqual(self.req("POST", "/api/profile", {"strength_days_per_week": 8})[0], 400)
+
+    def test_apple_health_import_auth_and_progress(self):
+        path = "/api/import/apple-health"
+        body = {"data": {"metrics": [{"name": "weight", "units": "kg", "data": [
+            {"date": "2026-11-09 07:30:00 -0400", "qty": 80}]}]}}
+        with patch.dict(os.environ, {"MACRO_ENGINE_HEALTH_TOKEN": ""}):
+            self.assertEqual(self.req("POST", path, body)[0], 503)
+        with patch.dict(os.environ, {"MACRO_ENGINE_HEALTH_TOKEN": "test-import-token"}):
+            self.assertEqual(self.req("POST", path, body)[0], 401)
+            self.assertEqual(self.req("POST", path, body, {"Authorization": "Bearer wrong"})[0], 401)
+            headers = {"Authorization": "Bearer test-import-token"}
+            self.assertEqual(self.req("POST", path, {}, headers)[0], 400)
+            status, result, _ = self.req("POST", path, body, headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(result["updated_fields"], 1)
+            self.assertEqual(self.req("POST", path, body, headers)[1]["skipped_fields"], 1)
+            _, progress, _ = self.req("GET", "/api/progress?date=2026-11-09")
+            self.assertEqual(progress["body"]["weight_kg"], 80)
+            self.assertIsNotNone(progress["apple_health_sync"]["last_sync_at"])
+            shortcut = {"metric": "body_fat_percentage", "value": 22.5, "unit": "%",
+                        "date": "2026-11-09T07:30:00-04:00"}
+            status, result, _ = self.req("POST", path, shortcut, headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(result["updated_fields"], 1)
+
+    def test_activity_import_auth_limits_status_and_mcp_agreement(self):
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("America/Halifax")).replace(microsecond=0)
+        yesterday = now - timedelta(days=1)
+        path = "/api/import/apple-health/activity"
+        body = {"schema_version": 1, "captured_at": now.isoformat(), "window": "normal",
+                "steps_status": "queried",
+                "steps_samples": f"4000\t{yesterday.isoformat()}\tRyan's Apple Watch\n"
+                                 f"3900\t{yesterday.isoformat()}\tRyan's iPhone",
+                "resting_heart_rate_status": "queried", "resting_heart_rate_samples": "",
+                "workouts_status": "unsupported"}
+        with patch.dict(os.environ, {"MACRO_ENGINE_HEALTH_TOKEN": ""}):
+            self.assertEqual(self.req("POST", path, body)[0], 503)
+        with patch.dict(os.environ, {"MACRO_ENGINE_HEALTH_TOKEN": "test-import-token"}):
+            self.assertEqual(self.req("POST", path, body)[0], 401)
+            self.assertEqual(self.req("GET", path + "/status")[0], 401)
+            self.assertEqual(self.req("GET", path + "/status", None, {"Authorization": "Bearer x"})[0], 401)
+            headers = {"Authorization": "Bearer test-import-token"}
+            status, sync, _ = self.req("GET", path + "/status", None, headers)
+            self.assertEqual((status, sync["mode"]), (200, "normal"))
+            self.assertEqual(self.req("POST", path, {**body, "surprise": 1}, headers)[0], 400)
+            status, result, _ = self.req("POST", path, body, headers)
+            self.assertEqual(status, 200, result)
+            self.assertEqual(result["notice"], "Updated")
+            self.assertNotIn("test-import-token", json.dumps(result))
+            replay = self.req("POST", path, body, headers)[1]
+            self.assertEqual(replay["notice"], "No new readings")
+            changed = {**body, "steps_samples": f"1\t{yesterday.isoformat()}\tRyan's Apple Watch"}
+            self.assertEqual(self.req("POST", path, changed, headers)[0], 409)
+            # Oversized bodies fail cleanly before parsing.
+            big = {**body, "steps_samples": "x" * 4_100_000}
+            self.assertEqual(self.req("POST", path, big, headers)[0], 400)
+            self.assertEqual(self.req("GET", path + "/status", None, headers)[1]["last_request"]["outcome"],
+                             "no_new_readings")
+        _, progress, _ = self.req("GET", "/api/progress")
+        act = progress["activity"]
+        self.assertEqual(act["source"]["selected"], "Ryan's Apple Watch")
+        day = next(d for d in act["days"] if d["date"] == yesterday.date().isoformat())
+        self.assertEqual(day["steps"], 4000)
+        import mcp_server
+        self.assertEqual(mcp_server.progress()["activity"], act)
+        status, created, _ = self.req("POST", "/api/workouts", {
+            "date": yesterday.date().isoformat(), "type": "Traditional Strength Training",
+            "duration_minutes": 45})
+        self.assertEqual((status, created["source"]), (200, "manual"))
+        status, edited, _ = self.req("POST", f"/api/workouts/{created['id']}", {"note": "legs"})
+        self.assertEqual((status, edited["note"]), (200, "legs"))
+        self.assertEqual(self.req("POST", "/api/workouts/9999", {"note": "x"})[0], 404)
+        self.assertEqual(self.req("DELETE", f"/api/workouts/{created['id']}")[0], 200)
+        self.assertEqual(self.req("DELETE", f"/api/workouts/{created['id']}")[0], 404)
+        status, settings, _ = self.req("POST", "/api/activity/settings", {"source": "Ryan's iPhone"})
+        self.assertEqual((status, settings["source"]["selected"]), (200, "Ryan's iPhone"))
+        self.assertEqual(self.req("POST", "/api/activity/settings", {"source": "Nope"})[0], 400)
 
     def test_empty_day_has_no_targets(self):
         status, body, _ = self.req("GET", "/api/day")

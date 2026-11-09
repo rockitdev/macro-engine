@@ -112,6 +112,80 @@ CREATE TABLE IF NOT EXISTS body_metrics (
     updated_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Import provenance is per field so separate weight/body-fat batches can merge.
+CREATE TABLE IF NOT EXISTS health_import_metrics (
+    date TEXT NOT NULL,
+    field TEXT NOT NULL,
+    sample_ts REAL NOT NULL,
+    value REAL NOT NULL,
+    PRIMARY KEY (date, field)
+);
+
+-- Apple Watch activity (macro_engine/activity.py). Context only: nothing here
+-- feeds targets or maintenance. Daily step totals are replacement snapshots
+-- per source; the selected source is chosen in settings (activity_source).
+CREATE TABLE IF NOT EXISTS health_step_days (
+    date         TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    policy       TEXT NOT NULL,
+    steps        INTEGER NOT NULL CHECK (steps >= 0),
+    sample_count INTEGER NOT NULL,
+    captured_at  TEXT NOT NULL,
+    captured_ts  REAL NOT NULL,
+    received_at  TEXT NOT NULL,
+    PRIMARY KEY (date, source, policy)
+);
+
+-- Latest dedicated resting-heart-rate estimate per local day and source.
+CREATE TABLE IF NOT EXISTS health_rhr_days (
+    date        TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    bpm         REAL NOT NULL,
+    sample_at   TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    captured_ts REAL NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (date, source)
+);
+
+-- Individual sessions. identity_basis: external | derived | manual.
+CREATE TABLE IF NOT EXISTS health_workouts (
+    id               INTEGER PRIMARY KEY,
+    identity_key     TEXT NOT NULL UNIQUE,
+    identity_basis   TEXT NOT NULL,
+    external_id      TEXT,
+    source           TEXT NOT NULL,
+    type             TEXT NOT NULL,
+    category         TEXT NOT NULL,
+    local_date       TEXT NOT NULL,
+    start_at         TEXT,
+    end_at           TEXT,
+    duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
+    duration_basis   TEXT NOT NULL,
+    note             TEXT,
+    captured_at      TEXT,
+    captured_ts      REAL,
+    received_at      TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_health_workouts_date ON health_workouts(local_date);
+
+-- Per-category/day acknowledgements. queried_* = last accepted query (drives
+-- catch-up); attempt_* = last attempt of any status. Data coverage is read
+-- from the value tables, so an accepted empty query is not an observation.
+CREATE TABLE IF NOT EXISTS health_activity_coverage (
+    category            TEXT NOT NULL,
+    date                TEXT NOT NULL,
+    queried_captured_at TEXT,
+    queried_ts          REAL,
+    queried_received_at TEXT,
+    attempt_status      TEXT,
+    attempt_captured_at TEXT,
+    attempt_ts          REAL,
+    attempt_received_at TEXT,
+    PRIMARY KEY (category, date)
+);
+
 -- Diet phases (cut | maintenance | reverse | diet_break). The latest phase
 -- starting at or before a date is the active one. params is JSON.
 CREATE TABLE IF NOT EXISTS phases (

@@ -33,7 +33,7 @@ import json
 import math
 import sqlite3
 
-from . import tracker
+from . import activity as activity_context, tracker
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,9 +127,15 @@ def _put_setting(con, key: str, value) -> None:
 PROFILE_DEFAULTS = {
     "sex": None,                 # "male" | "female"
     "birth_year": None,
+    "birth_date": None,
     "height_cm": None,
     "activity": "moderate",
     "resistance_training": True,
+    "daily_activity": None,     # seated | on_feet | physical; outside workouts
+    "strength_days_per_week": None,
+    "strength_minutes_per_session": None,
+    "goal": None,               # cut | maintain | reverse
+    "goal_loss_kg": None,       # approximate long-term aim, not a weekly rate
     "carb_share": 0.6,           # of non-protein kcal (p.186: 55/45-60/40 default)
     "adjust_with_activity": True,  # first plateau move: -5% C/F + 5% activity (p.229)
     "units": "kg",
@@ -142,9 +148,21 @@ def get_profile(con: sqlite3.Connection) -> dict:
 
 
 def set_profile(con: sqlite3.Connection, **fields) -> dict:
-    """Merge fields into the stored profile. Accepts height_in / age as
-    conveniences (converted to height_cm / birth_year)."""
+    """Merge profile fields without changing targets or starting a phase.
+
+    Accepts height_in, age and goal_loss_lb as unit/age conveniences.
+    A full birth_date takes precedence over the legacy birth_year.
+    """
     prof = get_profile(con)
+    requested_age = fields.get("age")
+    if fields.get("goal_loss_lb") is not None:
+        if isinstance(fields["goal_loss_lb"], bool):
+            raise ValueError("goal_loss_lb must be a number")
+        if fields.get("goal_loss_kg") is not None:
+            raise ValueError("give goal_loss_lb or goal_loss_kg, not both")
+        fields["goal_loss_kg"] = tracker._num(fields.pop("goal_loss_lb"), "goal_loss_lb", positive=True) / LB_PER_KG
+    else:
+        fields.pop("goal_loss_lb", None)
     if fields.get("height_in") is not None:
         fields["height_cm"] = tracker._num(fields.pop("height_in"), "height_in", positive=True) * CM_PER_IN
     else:
@@ -159,12 +177,23 @@ def set_profile(con: sqlite3.Connection, **fields) -> dict:
             continue
         if key not in PROFILE_DEFAULTS:
             raise ValueError(f"unknown profile field {key!r}")
+        if value == "" and key in ("birth_date", "daily_activity", "strength_days_per_week",
+                                   "strength_minutes_per_session", "goal", "goal_loss_kg"):
+            prof[key] = None
+            continue
         if key == "sex":
             v = str(value).strip().lower()
             v = {"m": "male", "f": "female", "man": "male", "woman": "female"}.get(v, v)
             if v not in ("male", "female"):
                 raise ValueError("sex must be male or female (used by the BMR equations)")
             value = v
+        elif key == "birth_date":
+            value = tracker._valid_date(value)
+            born = _d(value)
+            today = _dt.date.today()
+            age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+            if born.year < 1900 or age < 10:
+                raise ValueError("birth_date out of range")
         elif key == "birth_year":
             value = int(tracker._num(value, "birth_year", positive=True))
             if not 1900 <= value <= _dt.date.today().year - 10:
@@ -177,6 +206,26 @@ def set_profile(con: sqlite3.Connection, **fields) -> dict:
             value = str(value).strip().lower()
             if value not in ACTIVITY:
                 raise ValueError("activity must be one of " + ", ".join(ACTIVITY))
+        elif key == "daily_activity":
+            if value not in ("seated", "on_feet", "physical"):
+                raise ValueError("daily_activity must be seated, on_feet, or physical")
+        elif key in ("strength_days_per_week", "strength_minutes_per_session"):
+            if isinstance(value, bool):
+                raise ValueError(f"{key} must be a number")
+            n = tracker._num(value, key)
+            maximum = 7 if key == "strength_days_per_week" else 480
+            if n != int(n) or not 0 <= n <= maximum:
+                raise ValueError(f"{key} must be an integer from 0 to {maximum}")
+            value = int(n)
+        elif key == "goal":
+            if value not in ("cut", "maintain", "reverse"):
+                raise ValueError("goal must be cut, maintain, or reverse")
+        elif key == "goal_loss_kg":
+            if isinstance(value, bool):
+                raise ValueError("goal_loss_kg must be a number")
+            value = round(tracker._num(value, key, positive=True), 3)
+            if not 0 < value <= 300:
+                raise ValueError("goal_loss_kg must be greater than 0 and at most 300")
         elif key in ("resistance_training", "adjust_with_activity"):
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be true or false")
@@ -192,16 +241,27 @@ def set_profile(con: sqlite3.Connection, **fields) -> dict:
             if value not in ("kg", "lb"):
                 raise ValueError("units must be kg or lb")
         prof[key] = value
+    if prof.get("birth_date"):
+        born_year = _d(prof["birth_date"]).year
+        if requested_age is not None:
+            if requested_age != _age(prof):
+                raise ValueError("age conflicts with birth_date; update the birth date instead")
+        elif fields.get("birth_year") is not None and prof["birth_year"] != born_year:
+            raise ValueError("birth_year conflicts with birth_date")
+        prof["birth_year"] = born_year
     _put_setting(con, "profile", {k: prof[k] for k in PROFILE_DEFAULTS})
     con.commit()
     return prof
 
 
 def _age(prof: dict, date: str | None = None) -> int | None:
+    as_of = _d(date) if date else _dt.date.today()
+    if prof.get("birth_date"):
+        born = _d(prof["birth_date"])
+        return as_of.year - born.year - ((as_of.month, as_of.day) < (born.month, born.day))
     if not prof.get("birth_year"):
         return None
-    year = _d(date).year if date else _dt.date.today().year
-    return year - int(prof["birth_year"])
+    return as_of.year - int(prof["birth_year"])
 
 
 # ── Body metrics ─────────────────────────────────────────────────────────────
@@ -831,6 +891,9 @@ def check_in(con: sqlite3.Connection, date: str | None = None, *,
                            for w in trend[-4:]],
                  "proposed_targets": None, "adjust_pct": None, "activity_pct": None,
                  "reasons": [], "advice": []}
+    # Descriptive Watch context, attached before any early return. It never
+    # feeds the rules below (no targets/maintenance/plateau changes).
+    res["activity"] = activity_context.checkin_context(con, date, prof)
     if scores:
         if not isinstance(scores, dict):
             raise ValueError("scores must be an object of name -> 1-10")
@@ -1073,7 +1136,8 @@ def _finish(con, res: dict, apply: bool, effective_date: str) -> dict:
     phase = res.get("phase")
     week_start = (res.get("this_week") or {}).get("start")
     payload = {k: res.get(k) for k in ("reasons", "advice", "proposed_targets", "flags",
-                                       "diet_targets_to_restore", "loss_kg", "goal_loss_kg")}
+                                       "diet_targets_to_restore", "loss_kg", "goal_loss_kg",
+                                       "activity")}
     if res.get("scores"):
         payload["scores"] = res["scores"]
     con.execute(
@@ -1169,6 +1233,7 @@ def progress(con: sqlite3.Connection, date: str | None = None, weeks: int = 12) 
                         "vs_predicted_pct": adaptation},
         "adherence_14d": adherence(con, _add(date, -13), date),
         "last_checkin": (checkin_history(con, 1) or [None])[0],
+        "activity": activity_context.summary(con, date, plan=prof),
     }
     if phase and phase["params"].get("start_weight_kg") and body["weight_kg"]:
         out["phase_change_kg"] = round(body["weight_kg"] - phase["params"]["start_weight_kg"], 2)

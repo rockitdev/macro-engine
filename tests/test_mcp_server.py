@@ -420,6 +420,16 @@ class TestMCPTools(unittest.TestCase):
         self.assertEqual(self.ms.start_phase("diet_break")["kind"], "diet_break")
         self.assertIn("high", self.ms.plan_high_days(high_days=1, date="2026-09-09"))
 
+    def test_profile_full_birthdate_schedule_and_goal(self):
+        p = self.ms.set_profile(sex="male", birth_date="1981-11-10", height_in=72,
+                                daily_activity="seated", strength_days_per_week=6,
+                                strength_minutes_per_session=45, goal="cut", goal_loss_lb=100)
+        self.assertEqual(p["birth_year"], 1981)
+        self.assertEqual(p["strength_minutes_per_session"], 45)
+        out = self.ms.progress(date="2026-11-09")
+        self.assertEqual(out["body"]["age"], 44)
+        self.assertIsNone(out["targets"])
+
 
 if __name__ == "__main__":
     unittest.main()

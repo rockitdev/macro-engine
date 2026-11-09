@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/bottom-sheet"
 import { Input } from "@/components/ui/input"
 import { formatGrams, formatKcal } from "@/lib/format"
-import type { Day, FitMacroBudget, FitMealResult, FitItem, FitItemRole, FitOrder } from "@/types"
+import type { Day, FitMacroBudget, FitMealResult, FitItemRole, FitOrder } from "@/types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

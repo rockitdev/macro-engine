@@ -50,7 +50,7 @@ comments cite page numbers.
 
 | Tool | What it does |
 |---|---|
-| `set_profile` | Sex, age, height, activity level, and carb/fat preference |
+| `set_profile` | Sex, full birth date, height, desk/activity context, strength-training schedule, long-term loss goal, and carb/fat preference |
 | `log_weight` | Daily morning weigh-in, plus optional body fat %, waist, and hips (kg/lb, cm/in) |
 | `plan_targets` | Maintenance, then deficit from rate (% bodyweight/wk), then protein from lean mass and age, then the carb/fat split, then fiber. Preview first, then `apply` |
 | `check_in` | Weekly decision: hold, adjust, fix adherence, diet break, or reverse |
@@ -85,6 +85,169 @@ How the engine decides:
 The web app has a **Progress** tab (`#progress`) with the trend chart,
 weigh-in form, check-in, and target setup.
 
+The **Profile and goals** card saves your profile independently of macro
+targets. Birth dates give an exact age on the day being evaluated; older
+birth-year profiles still work. The strength schedule records days/week and
+minutes/session, and daily activity describes life outside workouts. Overall
+activity already includes exercise, so recording the schedule does not add
+exercise calories a second time. The optional long-term loss goal is an
+approximate aim, separate from the weekly loss rate and calorie targets.
+
+## Apple Health weigh-in sync
+
+Once RENPHO readings appear in Apple Health, use Apple's built-in Shortcuts
+(no paid exporter required), or Health Auto Export, to send readings. The phone must
+be able to reach the app (keep Tailscale connected when using its private URL).
+
+Set `MACRO_ENGINE_HEALTH_TOKEN` to a random secret in the API process environment.
+For Docker Compose, put it in the git-ignored `.env` file as
+`MACRO_ENGINE_HEALTH_TOKEN=your-secret`, restrict that file to your user, then
+recreate the API with `docker compose -f docker-compose.dev.yml up -d --no-deps api`.
+Generate a secret with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+Imports are disabled until the token is set. Use HTTPS or a private encrypted
+connection. This token protects the importer; the rest of this local app still
+relies on your private network and must not be exposed publicly.
+
+### Free option: Apple Shortcuts
+
+**Prebuilt Shortcut:** `web/public/shortcuts/Sync Macro Engine.unsigned.shortcut`
+uploads weight and body fat (as before), plus Apple Watch **steps** and
+**resting heart rate** for activity context. No token is embedded; the import
+question asks for the Authorization header. A variant,
+`Sync Macro Engine (without resting HR).unsigned.shortcut`, omits resting HR
+in case that Health type fails on the phone. Both come from
+`scripts/build_health_shortcut.py`; see
+[docs/apple-health-capabilities.md](docs/apple-health-capabilities.md) for
+what Shortcuts can and cannot read.
+
+**Offline Mac bundle (Mac keeps Cloudflare WARP, no Tailscale):**
+
+```bash
+python3 scripts/package_health_shortcut.py           # private ZIP, reuses the existing Sync header.txt
+python3 scripts/package_health_shortcut.py --public  # credential-free ZIP
+```
+
+Both ZIPs are git-ignored and written with mode 0600. Transfer the private ZIP
+through your usual file-transfer route, unzip it, and follow `START HERE.txt`:
+
+1. Run `/bin/bash install-health-shortcut-mac.command`. Add
+   `--without-resting-hr` for the variant. It reads only the bundled files and
+   asks Apple to sign them. It never contacts Macro Engine or Tailscale.
+2. Choose **Replace** for the existing Sync Macro Engine, so the RENPHO
+   automation keeps its target. Paste the line from `Sync header.txt`.
+3. After iCloud sync, run the shortcut on the iPhone (unlocked, Tailscale on).
+   Allow Steps and Resting Heart Rate.
+4. Check Progress → Activity. Choose your Apple Watch as the source if asked.
+
+Recommended automations on the iPhone: keep **App → RENPHO → Is Closed**, and
+add **Time of Day → 9:00 PM daily → Run Immediately → Sync Macro Engine**.
+Activity then uploads even on days without a weigh-in, and each run refreshes
+yesterday's late Watch data. Re-runs are always safe. Health can't be read
+while the phone is locked. If an automation fails, open the shortcut and run it
+manually; the next run catches up, reaching back up to 30 days. A Watch
+"workout ended" trigger is not needed, because workouts can't be imported.
+
+On a Mac that *can* reach Tailscale, the downloader still works:
+
+```bash
+macro_installer="$(mktemp)" && curl -fsS 'https://moore.tailc24dca.ts.net:4325/shortcuts/install-mac.command' -o "$macro_installer" && /bin/bash "$macro_installer"
+```
+
+Automated checks cover structure, references, and payload compatibility only.
+Signing, import, Health permissions and run time need an Apple device; the
+pending checks are listed in the capability doc. For another server, run
+`python3 scripts/build_health_shortcut.py --origin https://YOUR_HOST --output-dir web/public/shortcuts`.
+
+### Activity (steps, resting heart rate, workouts)
+
+`POST /api/import/apple-health/activity` and
+`GET /api/import/apple-health/activity/status` use the same Bearer token.
+
+- **Steps** are labelled *Watch-recorded steps*. The shortcut sends raw samples
+  from every source. The server keeps per-source daily totals, and summaries use
+  only the one source you select (never iPhone + Watch added together).
+  Today is shown as "so far" and left out of averages. A day with no samples is
+  unknown, not zero.
+- **Resting heart rate** uses Health's dedicated resting estimate, latest per
+  day. Newer uploads replace revised estimates.
+- **Workouts** can't be read by Apple Shortcuts. Add them in Progress →
+  Activity; manual entries can be edited or deleted. Unrecorded sessions are
+  not treated as skipped.
+- Days are grouped in the configured timezone (`America/Halifax`), changeable
+  via `POST /api/activity/settings {"timezone": ...}`.
+- Activity is shown in Progress and in new check-ins (`activity`, via HTTP and
+  MCP). It never changes targets, calorie budgets, maintenance, or phases.
+
+**Manual construction (optional):**
+
+Create a shortcut named **Sync Macro Engine**. Keep Tailscale connected and
+run it manually once to grant Health and network permissions.
+
+1. Add **Find Health Samples**: Type is Weight, Start Date is in the last
+   7 days, Unit is kg. Filter to RENPHO as the source if available. Leave
+   grouping off and do not limit to one result, so missed dates catch up.
+2. Add **Repeat with Each** over the found samples. Inside the repeat, use
+   **Get Details of Health Sample** on the Repeat Item to get its Value and
+   Start Date. Format that sample date with **Format Date**, ISO 8601,
+   including time and timezone. Do not use today's date for old samples.
+3. Inside the repeat add **Get Contents of URL**, using your app's origin
+   followed by `/api/import/apple-health`. Expand its options, choose POST,
+   and add header `Authorization: Bearer your-secret`. Set Request Body to
+   JSON with these fields (insert the value/date variables, not their names):
+
+   | Key | Type | Value |
+   |---|---|---|
+   | `metric` | Text | `weight` |
+   | `value` | Number | Sample Value variable |
+   | `unit` | Text | `kg` |
+   | `date` | Text | Formatted Date variable |
+
+4. After End Repeat, repeat these actions for Body Fat Percentage. Use
+   `body_fat_percentage` for metric and `%` for unit. Send percentage points
+   (e.g. 22.5). Each metric keeps its own sample date. Empty searches simply
+   run no iterations.
+5. Run the shortcut and check Progress. Then create a personal automation
+   for **App → RENPHO → Is Closed → Run Immediately**, running this shortcut.
+   Switch from RENPHO while the phone stays unlocked after readings sync.
+   If your iOS version uses **Ask Before Running**, turn that off instead.
+
+Apple documents [HTTP requests in Shortcuts](https://support.apple.com/guide/shortcuts/request-your-first-api-apd58d46713f/ios)
+and [app automation triggers](https://support.apple.com/guide/shortcuts/setting-triggers-apde31e9638b/ios).
+The automation needs an unlocked phone for Health access, a reachable server,
+and readings already written to Apple Health. Running the shortcut again is
+safe; its seven-day window catches up on missed uploads. This does not run
+directly when the scale records a reading. A scheduled trigger can also be
+used, but may fail if the phone is locked.
+
+### Optional paid exporter: Health Auto Export
+
+In Health Auto Export, create an enabled **REST API** automation (requires its
+paid automation feature):
+
+- URL: your app's HTTPS origin followed by `/api/import/apple-health`.
+- HTTP header: `Authorization` with value `Bearer your-secret`.
+- Data type: Health Metrics; select Weight and Body Fat Percentage only,
+  with RENPHO as the preferred source for both.
+- Format: JSON, Version 2, **Summarize Data off**. Weight units: kg or lb;
+  body fat: percentage points (`22.5`, not `0.225`).
+- Date range: Default (yesterday and today); desired sync frequency: hourly.
+  Use Manual Upload for an initial history import or missed dates. Enable
+  batching or shorten the date range if the request exceeds 1 MB.
+
+Run Manual Upload once while the phone is unlocked. Refresh Progress to check
+the measurements and “Apple Health last received” time beneath the weigh-in form.
+Background App Refresh must be enabled; iOS can delay exports and cannot read
+Health data while locked. See the provider's
+[REST API setup](https://help.healthyapps.dev/en/health-auto-export/automations/rest-api/)
+and [JSON format](https://help.healthyapps.dev/en/health-auto-export/export-format/health-metrics/).
+
+The importer uses the sample's local date and the latest timestamp per metric
+per day. Repeated or older samples are skipped. Existing manual values, subsequent
+manual changes, and deletion of imported days take precedence over imports.
+Other measurements and notes are preserved. Corrected values with an identical
+timestamp are not automatically reapplied; edit that day's measurement manually.
+This feeds the existing weekly check-in; it does not apply target changes.
+
 ## Architecture
 
 - `macro_engine/db.py` — SQLite schema (foods, per-100g nutrients, portions,
@@ -97,6 +260,9 @@ weigh-in form, check-in, and target setup.
   day totals, remaining, week bank
 - `macro_engine/coach.py` — body metrics, weekly trend, measured/predicted
   maintenance, target planning, weekly check-ins, phases (Fat Loss Forever)
+- `macro_engine/health_import.py` / `macro_engine/activity.py` — Apple Health
+  body-metric import; Watch steps/resting HR/workout snapshots, sync status,
+  read-only activity summaries
 - `mcp_server.py` — FastMCP stdio server
 
 Design rules: log rows carry denormalized macros (history survives data

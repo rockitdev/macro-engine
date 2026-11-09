@@ -1,4 +1,4 @@
-import type { Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Targets, Week } from "./types"
+import type { CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week } from "./types"
 
 export class ApiError extends Error {}
 
@@ -147,4 +147,43 @@ export function fitMeal(body: {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+// ── Coaching ────────────────────────────────────────────────────────────────
+
+export function getProgress(date: string) {
+  return request<Progress>(`/api/progress?date=${encodeURIComponent(date)}`)
+}
+
+export function saveProfile(body: Partial<Profile> & { age?: number }) {
+  return request<Profile>("/api/profile", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function logMetrics(body: {
+  date: string
+  weight?: number
+  unit?: "kg" | "lb"
+  body_fat_pct?: number
+  waist?: number
+  length_unit?: "cm" | "in"
+}) {
+  return request<Record<string, unknown>>("/api/metrics", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function planTargets(body: {
+  goal: "cut" | "maintain" | "reverse"
+  rate_pct?: number
+  date: string
+  apply?: boolean
+  pace?: string
+}) {
+  return request<Plan>("/api/plan", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function checkIn(body: {
+  date: string
+  flags?: Record<string, boolean>
+  apply?: boolean
+}) {
+  return request<CheckIn>("/api/checkin", { method: "POST", body: JSON.stringify(body) })
 }

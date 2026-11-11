@@ -1,4 +1,4 @@
-import type { ActivitySummary, CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
+import type { ActivitySummary, BarcodeFood, CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
 
 export class ApiError extends Error {}
 
@@ -133,6 +133,10 @@ export function addAlias(body: {
 
 export function getChains() {
   return request<{ chains: string[] }>("/api/chains")
+}
+
+export function lookupBarcode(code: string) {
+  return request<BarcodeFood>(`/api/barcode/${encodeURIComponent(code)}`)
 }
 
 export function fitMeal(body: {

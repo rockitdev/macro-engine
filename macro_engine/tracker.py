@@ -437,7 +437,9 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
             if in_week and day < today_d:
                 saved_days += 1
                 for key in BANK:
-                    saved_raw[key] += float(targets[key]) - raw[key]
+                    goal = targets[key]
+                    if goal is not None:
+                        saved_raw[key] += float(goal) - raw[key]
         if day == today_d:
             today_targets = targets
             today_raw = raw
@@ -451,7 +453,8 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
     if in_week and today_targets is not None and today_raw is not None:
         extra = saved_raw if saved_days else {k: 0.0 for k in BANK}
         room = {
-            k: round(float(today_targets[k]) - today_raw[k] + extra[k], 1)
+            k: (round(float(today_targets[k]) - today_raw[k] + extra[k], 1)
+                if today_targets[k] is not None else None)
             for k in BANK
         }
 

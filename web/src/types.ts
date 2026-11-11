@@ -199,6 +199,20 @@ export type FitMealResult = {
   note?: string
 }
 
+export type BarcodeFood = {
+  name: string
+  brand: string | null
+  kcal: number | null
+  protein_g: number | null
+  carb_g: number | null
+  fat_g: number | null
+  fiber_g: number | null
+  portion_label: string | null
+  portion_grams: number | null
+  barcode: string
+  off_found: true
+}
+
 export type NewFood = {
   name: string
   kcal: number

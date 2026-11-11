@@ -169,7 +169,8 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
       if (!streamRef.current) return
       if (video.readyState >= video.HAVE_ENOUGH_DATA) {
         try {
-          const result = await reader.decodeOnce(video)
+          // decode() reads the current video frame synchronously; throws when no code is found.
+          const result = reader.decode(video)
           if (result) {
             handleDetected(result.getText())
             return

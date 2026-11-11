@@ -495,5 +495,154 @@ class TestLoadDataset(unittest.TestCase):
         self.assertEqual(count, 3)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  load_dataset() — branded dataset (serving data from branded_food.csv)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLoadBrandedDataset(unittest.TestCase):
+    """Branded foods pull serving data from branded_food.csv, not food_portion.csv."""
+
+    BRANDED_ZIP = etl_fdc.DATASETS["branded"]["zip"]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.raw_dir = Path(self.tmp.name) / "raw"
+        self.raw_dir.mkdir()
+        self.con = db.connect(Path(self.tmp.name) / "test.db")
+
+    def tearDown(self):
+        self.con.close()
+        self.tmp.cleanup()
+
+    def _place_zip(self, members: dict) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for member, content in members.items():
+                z.writestr(member, content)
+        (self.raw_dir / self.BRANDED_ZIP).write_bytes(buf.getvalue())
+
+    def _branded_zip(self, food_csv: str, nutrient_csv: str,
+                     food_nutrient_csv: str,
+                     branded_food_csv: str | None = None) -> None:
+        members = {
+            "food.csv": food_csv,
+            "nutrient.csv": nutrient_csv,
+            "food_nutrient.csv": food_nutrient_csv,
+        }
+        if branded_food_csv is not None:
+            members["branded_food.csv"] = branded_food_csv
+        self._place_zip(members)
+
+    def test_branded_food_loaded_with_source_fdc_branded(self):
+        """Branded foods land in the DB with source='fdc_branded'."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5001,branded_food,Grenade Oreo Protein Bar\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n2,203\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5001,1,388\n5001,2,32\n",
+        )
+        count = etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        self.assertEqual(count, 1)
+        row = self.con.execute("SELECT * FROM foods WHERE source='fdc_branded'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["name"], "Grenade Oreo Protein Bar")
+
+    def test_branded_serving_size_creates_portion(self):
+        """serving_size+serving_size_unit=g from branded_food.csv becomes a portion."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5002,branded_food,Protein Bar\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5002,1,400\n",
+            branded_food_csv=(
+                "fdc_id,brand_owner,brand_name,serving_size,serving_size_unit,"
+                "household_serving_fulltext,branded_food_category\n"
+                "5002,Grenade UK,Grenade,60,g,1 bar,Snacks\n"),
+        )
+        etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        fid = self.con.execute(
+            "SELECT id FROM foods WHERE source_id='5002'").fetchone()[0]
+        portions = self.con.execute(
+            "SELECT label, grams FROM portions WHERE food_id=?", (fid,)).fetchall()
+        self.assertEqual(len(portions), 1)
+        self.assertEqual(portions[0]["label"], "1 bar")
+        self.assertAlmostEqual(portions[0]["grams"], 60.0)
+
+    def test_branded_serving_size_fallback_label_when_no_household_text(self):
+        """When household_serving_fulltext is empty, label is '{size} g'."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5003,branded_food,Protein Shake\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5003,1,50\n",
+            branded_food_csv=(
+                "fdc_id,brand_owner,brand_name,serving_size,serving_size_unit,"
+                "household_serving_fulltext,branded_food_category\n"
+                "5003,AcmeBrand,AcmeBrand,355,g,,Beverages\n"),
+        )
+        etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        fid = self.con.execute(
+            "SELECT id FROM foods WHERE source_id='5003'").fetchone()[0]
+        portions = self.con.execute(
+            "SELECT label, grams FROM portions WHERE food_id=?", (fid,)).fetchall()
+        self.assertEqual(len(portions), 1)
+        self.assertIn("355", portions[0]["label"])
+
+    def test_branded_non_gram_unit_skips_portion(self):
+        """A serving in ml (not a gram unit) must not create a portion."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5004,branded_food,Orange Juice\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5004,1,45\n",
+            branded_food_csv=(
+                "fdc_id,brand_owner,brand_name,serving_size,serving_size_unit,"
+                "household_serving_fulltext,branded_food_category\n"
+                "5004,OJ Co,OJ Co,240,ml,1 cup,Beverages\n"),
+        )
+        etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        fid = self.con.execute(
+            "SELECT id FROM foods WHERE source_id='5004'").fetchone()[0]
+        portions = self.con.execute(
+            "SELECT * FROM portions WHERE food_id=?", (fid,)).fetchall()
+        self.assertEqual(len(portions), 0)
+
+    def test_branded_brand_name_stored_on_food(self):
+        """brand_name from branded_food.csv is stored in foods.brand."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5005,branded_food,Whey Isolate\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5005,1,380\n",
+            branded_food_csv=(
+                "fdc_id,brand_owner,brand_name,serving_size,serving_size_unit,"
+                "household_serving_fulltext,branded_food_category\n"
+                "5005,Optimum Nutrition Inc,Optimum Nutrition,30,g,1 scoop,Sports\n"),
+        )
+        etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        row = self.con.execute(
+            "SELECT brand FROM foods WHERE source_id='5005'").fetchone()
+        self.assertEqual(row["brand"], "Optimum Nutrition")
+
+    def test_branded_without_branded_food_csv_no_crash(self):
+        """A branded zip without branded_food.csv loads foods without portions."""
+        self._branded_zip(
+            food_csv="fdc_id,data_type,description\n5006,branded_food,Mystery Bar\n",
+            nutrient_csv="id,nutrient_nbr\n1,208\n",
+            food_nutrient_csv="fdc_id,nutrient_id,amount\n5006,1,300\n",
+        )
+        count = etl_fdc.load_dataset(self.con, "branded", self.raw_dir)
+        self.assertEqual(count, 1)
+        fid = self.con.execute(
+            "SELECT id FROM foods WHERE source_id='5006'").fetchone()[0]
+        portions = self.con.execute(
+            "SELECT * FROM portions WHERE food_id=?", (fid,)).fetchall()
+        self.assertEqual(len(portions), 0)
+
+    def test_branded_dataset_not_in_default_datasets(self):
+        """'branded' must not appear in DEFAULT_DATASETS (opt-in only)."""
+        self.assertNotIn("branded", etl_fdc.DEFAULT_DATASETS)
+
+    def test_branded_dataset_in_datasets_dict(self):
+        """'branded' must be registered in DATASETS so --datasets branded works."""
+        self.assertIn("branded", etl_fdc.DATASETS)
+        self.assertEqual(etl_fdc.DATASETS["branded"]["source"], "fdc_branded")
+
+
 if __name__ == "__main__":
     unittest.main()

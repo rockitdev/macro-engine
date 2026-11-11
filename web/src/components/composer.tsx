@@ -56,13 +56,49 @@ function itemFor(food: Food, choice: Choice, qty: number) {
   return { food_id: food.id, qty, unit: "g" }
 }
 
-function sourceLabel(food: Food): string {
-  const parts: string[] = []
-  if (food.store) parts.push(food.store)
-  else if (food.brand) parts.push(food.brand)
-  else parts.push(food.source === "usda" ? "USDA" : food.source)
-  if (food.kcal != null) parts.push(`${formatKcal(food.kcal)} kcal / 100 g`)
-  return parts.join(" · ")
+/** The source / brand identifier shown before the calorie detail. */
+function sourceIdent(food: Food): string {
+  if (food.store) return food.store
+  if (food.brand) return food.brand
+  return food.source === "usda" ? "USDA" : food.source
+}
+
+/**
+ * Subtitle component for a food search-result card.
+ *
+ * When the food has at least one portion, the primary calorie figure is
+ * per-serving (e.g. "230 kcal / 1 bar (60 g)") and the per-100 g value is
+ * shown in smaller, lighter text as a secondary reference.
+ *
+ * When there is no portion data the display falls back to the original
+ * "NNN kcal / 100 g" to avoid any regression for plain whole foods.
+ */
+function FoodSubtitle({ food }: { food: Food }) {
+  const ident = sourceIdent(food)
+
+  if (food.kcal == null) {
+    return <>{ident}</>
+  }
+
+  const primaryPortion = food.portions?.[0]
+
+  if (primaryPortion) {
+    const servingKcal = Math.round(food.kcal * primaryPortion.grams / 100)
+    return (
+      <>
+        {ident}
+        {" · "}
+        <strong style={{ fontWeight: 500 }}>
+          {formatKcal(servingKcal)} kcal / {primaryPortion.label} ({formatGrams(primaryPortion.grams)} g)
+        </strong>
+        <span style={{ fontSize: 11, opacity: 0.65 }}>
+          {" · "}{formatKcal(food.kcal)} per 100 g
+        </span>
+      </>
+    )
+  }
+
+  return <>{ident} · {formatKcal(food.kcal)} kcal / 100 g</>
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -356,7 +392,7 @@ export function Composer({
                 >
                   <span>
                     <span style={{ display: "block", fontSize: 14, fontWeight: 500 }}>{food.name}</span>
-                    <span style={{ display: "block", fontSize: 12, color: "#5f6b65" }}>{sourceLabel(food)}</span>
+                    <span style={{ display: "block", fontSize: 12, color: "#5f6b65" }}><FoodSubtitle food={food} /></span>
                   </span>
                   {food.matched_alias && (
                     <span style={{

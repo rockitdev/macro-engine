@@ -253,20 +253,30 @@ This feeds the existing weekly check-in; it does not apply target changes.
 The web UI is an installable PWA: full-screen, bottom tab bar, dark mode, and it
 refreshes itself whenever it returns to the foreground.
 
-Two endpoints come up with `docker compose -f docker-compose.dev.yml up -d`:
+The installed app always runs `main`, from its own checkout, so it is unaffected
+by whatever branch is checked out for development:
 
-| Endpoint | Serves | Use for |
+| Endpoint | What | Runs |
 |---|---|---|
-| `:4325` (`web`) | Vite dev server, hot reload | Development |
-| `:4332` (`api`) | Built `web/dist` + the API | The installed app |
+| `:4325` | Vite dev server + dev API (`docker-compose.dev.yml`) | your working tree, hot reload |
+| `:4332` | Built `web/dist` + API (`docker-compose.app.yml`) | `origin/main`, in `~/deploy/macro-engine` |
 
-Install from the built endpoint (Safari → Share → Add to Home Screen); the icon
-is tied to the host it was installed from. After changing the UI, rebuild what
-the installed app serves:
+`scripts/deploy-app.sh` fetches `origin/main` and, when it has moved, rebuilds
+the web app and restarts the service. A systemd user timer runs it every two
+minutes, so merging to `main` is the deploy:
 
 ```bash
-docker compose -f docker-compose.dev.yml exec web npm run build
+scripts/deploy-app.sh                      # first run clones ~/deploy/macro-engine
+cp .env ~/deploy/macro-engine/.env         # MACRO_ENGINE_HEALTH_TOKEN for Apple Health sync
+FORCE=1 ~/deploy/macro-engine/scripts/deploy-app.sh
+cp scripts/systemd/macro-engine-app-deploy.* ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now macro-engine-app-deploy.timer
+journalctl --user -u macro-engine-app-deploy -n 20    # deploy log
 ```
+
+Install from the `:4332` endpoint (Safari → Share → Add to Home Screen); the
+icon is tied to the host it was installed from. Both stacks share the same
+database, so a branch that changes the schema affects the installed app too.
 
 No service worker yet, so the app needs to reach the server to load.
 

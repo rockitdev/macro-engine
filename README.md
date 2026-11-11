@@ -25,6 +25,21 @@ claude mcp add macro-engine -- \
   /path/to/macro-engine/mcp_server.py
 ```
 
+Register it against the `main` deployment rather than a working tree (see
+[Web app on iPhone](#web-app-on-iphone-home-screen-install)): each session
+spawns its own copy of the server at startup, so a working-tree path runs
+whatever branch is checked out against the real database.
+
+```bash
+claude mcp add -s user macro-engine -- \
+  ~/deploy/macro-engine/.venv/bin/python ~/deploy/macro-engine/mcp_server.py
+```
+
+`scripts/deploy-app.sh` keeps that checkout and its `.venv` current. Sessions
+already running keep the code they started with until they restart. To try
+branch code, add a second registration under another name (for example
+`macro-engine-dev`) pointing at the working tree.
+
 Or in a project `.mcp.json`:
 
 ```json

@@ -5,7 +5,7 @@ services:
     working_dir: /app
     volumes:
       - .:/app:ro
-      - macro_db:/root/.local/share/macro-engine
+      - /home/moore/.local/share/macro-engine:/root/.local/share/macro-engine
     environment:
       MACRO_ENGINE_DB: /root/.local/share/macro-engine/macros.db
       MACRO_ENGINE_HEALTH_TOKEN: ${MACRO_ENGINE_HEALTH_TOKEN:-}
@@ -33,7 +33,3 @@ services:
 
 volumes:
   web_node_modules:
-  # Named volume so the DB persists across container recreates.
-  # Seed it once by copying ~/.local/share/macro-engine/macros.db into the volume,
-  # or start fresh (the schema is applied on connect).
-  macro_db:

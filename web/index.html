@@ -2,9 +2,36 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Macro Engine</title>
+    <meta name="description" content="Macro tracking and coaching." />
+
+    <!-- Install / Home Screen -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Macros" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#f7f8f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0e1311" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Follow the system appearance before first paint (no flash). -->
+    <script>
+      (function () {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)")
+        function apply() { document.documentElement.classList.toggle("dark", mq.matches) }
+        apply()
+        mq.addEventListener("change", apply)
+        // Home Screen launch (iOS sets navigator.standalone; others match display-mode).
+        if (window.navigator.standalone || window.matchMedia("(display-mode: standalone)").matches) {
+          document.documentElement.classList.add("standalone")
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

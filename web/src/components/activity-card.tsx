@@ -45,7 +45,7 @@ function StepsCell({ day }: { day: ActivityDay }) {
 function SyncStatus({ a }: { a: ActivitySummary }) {
   const last = a.sync.last_request
   const tone = !last ? "bg-mist text-foreground"
-    : last.outcome === "partial" ? "bg-fat-bg text-fat-fg" : "bg-[#e7f2ec] text-spinach"
+    : last.outcome === "partial" ? "bg-fat-bg text-fat-fg" : "bg-[var(--me-green-soft)] text-spinach"
   return (
     <div className="grid gap-1 text-sm">
       <p className="flex flex-wrap items-center gap-2">
@@ -186,7 +186,7 @@ export function ActivityCard({ activity: a, date, onChanged }: { activity: Activ
   }
 
   return (
-    <section className="rounded-xl border border-[#e3e7e4] bg-white p-5">
+    <section className="rounded-xl border border-[var(--me-line)] bg-[var(--me-surface)] p-5">
       <h2 className="text-sm font-medium text-muted-foreground">Activity</h2>
       <div className="mt-3 grid gap-4">
         <SyncStatus a={a} />
@@ -249,7 +249,7 @@ export function ActivityCard({ activity: a, date, onChanged }: { activity: Activ
             </thead>
             <tbody>
               {days.map((d) => (
-                <tr key={d.date} className="border-t border-[#eef1ef]">
+                <tr key={d.date} className="border-t border-[var(--me-mist)]">
                   <td className="py-1.5">{shortDate(d.date)}</td>
                   <td className="py-1.5"><StepsCell day={d} /></td>
                   <td className="py-1.5 tabular-nums">{d.resting_hr_bpm != null ? `${Math.round(d.resting_hr_bpm)} bpm` : <span className="text-muted-foreground">—</span>}</td>
@@ -277,7 +277,7 @@ export function ActivityCard({ activity: a, date, onChanged }: { activity: Activ
           ) : (
             <ul className="grid gap-1 text-sm">
               {[...a.workouts].reverse().map((w) => (
-                <li key={w.id} className="flex flex-wrap items-baseline justify-between gap-x-3 border-t border-[#eef1ef] py-1.5">
+                <li key={w.id} className="flex flex-wrap items-baseline justify-between gap-x-3 border-t border-[var(--me-mist)] py-1.5">
                   <span>
                     {shortDate(w.local_date)} · {w.type} · <span className="tabular-nums">{w.minutes} min</span>
                     <span className="text-xs text-muted-foreground"> ({BASIS[w.duration_basis]}{w.source !== "manual" ? `, ${w.source}` : ""})</span>

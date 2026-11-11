@@ -232,30 +232,30 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
 
       {/* State messages */}
       {state.kind === "idle" && (
-        <p style={{ fontSize: 14, color: "#5f6b65", margin: 0 }}>
+        <p style={{ fontSize: 14, color: "var(--me-muted)", margin: 0 }}>
           Point your camera at the barcode on the packaging.
         </p>
       )}
       {state.kind === "requesting" && (
-        <p style={{ fontSize: 14, color: "#5f6b65", margin: 0 }}>Requesting camera access…</p>
+        <p style={{ fontSize: 14, color: "var(--me-muted)", margin: 0 }}>Requesting camera access…</p>
       )}
       {state.kind === "scanning" && (
-        <p style={{ fontSize: 14, color: "#5f6b65", margin: 0 }}>
+        <p style={{ fontSize: 14, color: "var(--me-muted)", margin: 0 }}>
           Hold the barcode steady inside the green line.
         </p>
       )}
       {state.kind === "denied" && (
-        <p style={{ fontSize: 14, color: "#c2512e", margin: 0 }} role="alert">
+        <p style={{ fontSize: 14, color: "var(--me-roast)", margin: 0 }} role="alert">
           {state.message}
         </p>
       )}
       {state.kind === "no-camera" && (
-        <p style={{ fontSize: 14, color: "#c2512e", margin: 0 }} role="alert">
+        <p style={{ fontSize: 14, color: "var(--me-roast)", margin: 0 }} role="alert">
           No camera found on this device.
         </p>
       )}
       {state.kind === "error" && (
-        <p style={{ fontSize: 14, color: "#c2512e", margin: 0 }} role="alert">
+        <p style={{ fontSize: 14, color: "var(--me-roast)", margin: 0 }} role="alert">
           {state.message}
         </p>
       )}
@@ -269,7 +269,7 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
             style={{
               font: "inherit", fontSize: 14, fontWeight: 500,
               height: 40, padding: "0 18px", borderRadius: 10,
-              border: "none", background: "#1e6b45", color: "#f6faf7",
+              border: "none", background: "var(--me-green)", color: "var(--me-on-green)",
               cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8,
             }}
           >
@@ -283,7 +283,7 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
           style={{
             font: "inherit", fontSize: 14, fontWeight: 500,
             height: 40, padding: "0 18px", borderRadius: 10,
-            border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+            border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
             cursor: "pointer",
           }}
         >

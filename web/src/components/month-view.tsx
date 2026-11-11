@@ -15,10 +15,10 @@ function statusDot(day: WeekDay, today: string): { color: string; kcalColor: str
   const kcalTarget = day.targets.kcal
   if (kcalTarget == null) return null
   const isToday = day.date === today
-  if (isToday) return { color: "#b07d12", kcalColor: "#111814" } // in progress
+  if (isToday) return { color: "var(--me-grain)", kcalColor: "var(--me-ink)" } // in progress
   const kcalOver = day.under.kcal != null && day.under.kcal < 0
-  if (kcalOver) return { color: "#c2512e", kcalColor: "#b03d17" }
-  return { color: "#1e6b45", kcalColor: "#111814" }
+  if (kcalOver) return { color: "var(--me-roast)", kcalColor: "var(--me-over)" }
+  return { color: "var(--me-green-text)", kcalColor: "var(--me-ink)" }
 }
 
 export function MonthView({
@@ -60,7 +60,7 @@ export function MonthView({
             onChange={(e) => void onWeekStart(e.target.value)}
             style={{
               appearance: "none", height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 13, fontWeight: 500,
-              border: "1px solid #e3e7e4", borderRadius: 8, background: "#fff", color: "#111814",
+              border: "1px solid var(--me-line)", borderRadius: 8, background: "var(--me-surface)", color: "var(--me-ink)",
               cursor: "pointer", outline: "none",
             }}
           >
@@ -71,25 +71,25 @@ export function MonthView({
       </div>
 
       {/* Summary cards */}
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16 }}>
+      <div className="stat-grid" style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16 }}>
         <div className="me-card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, color: "#5f6b65" }}>Carbs so far</div>
-          <div className="num" style={{ fontSize: 30, fontWeight: 600, color: fatLeft != null && carbLeft != null && carbLeft < 0 ? "#8a3518" : "#6b4e0b" }}>
+          <div style={{ fontSize: 13, color: "var(--me-muted)" }}>Carbs so far</div>
+          <div className="num" style={{ fontSize: 30, fontWeight: 600, color: fatLeft != null && carbLeft != null && carbLeft < 0 ? "var(--me-fat-fg)" : "var(--me-carbs-fg)" }}>
             {carbLabel}
           </div>
         </div>
         <div className="me-card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, color: "#5f6b65" }}>Fat so far</div>
-          <div className="num" style={{ fontSize: 30, fontWeight: 600, color: fatLeft != null && fatLeft < 0 ? "#8a3518" : "#6b4e0b" }}>
+          <div style={{ fontSize: 13, color: "var(--me-muted)" }}>Fat so far</div>
+          <div className="num" style={{ fontSize: 30, fontWeight: 600, color: fatLeft != null && fatLeft < 0 ? "var(--me-fat-fg)" : "var(--me-carbs-fg)" }}>
             {fatLabel}
           </div>
         </div>
         <div className="me-card" style={{ padding: 18 }}>
-          <div style={{ fontSize: 13, color: "#5f6b65" }}>Protein so far</div>
+          <div style={{ fontSize: 13, color: "var(--me-muted)" }}>Protein so far</div>
           <div className="num" style={{ fontSize: 30, fontWeight: 600 }}>
             {formatGrams(proteinEaten)}{" "}
             {proteinTarget != null && (
-              <span style={{ fontSize: 16, color: "#5f6b65", fontWeight: 500 }}>/ {formatGrams(proteinTarget)} g</span>
+              <span style={{ fontSize: 16, color: "var(--me-muted)", fontWeight: 500 }}>/ {formatGrams(proteinTarget)} g</span>
             )}
           </div>
         </div>
@@ -98,7 +98,7 @@ export function MonthView({
       {/* Calendar */}
       <section className="me-card" style={{ marginTop: 20, padding: 20 }}>
         {/* Day-of-week headers */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 8, fontSize: 13, color: "#5f6b65" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 8, fontSize: 13, color: "var(--me-muted)" }}>
           {DOW_LABELS.map((d) => <span key={d}>{d}</span>)}
         </div>
 
@@ -122,21 +122,21 @@ export function MonthView({
                   all: "unset", boxSizing: "border-box",
                   display: "flex", flexDirection: "column", gap: 6,
                   padding: 10, borderRadius: 10,
-                  border: isToday ? "1px solid #1e6b45" : "1px solid #eef1ef",
+                  border: isToday ? "1px solid var(--me-green)" : "1px solid var(--me-mist)",
                   minHeight: 84, cursor: "pointer",
-                  background: isToday ? "#f2f8f4" : "transparent",
+                  background: isToday ? "var(--me-green-faint)" : "transparent",
                   opacity: isOutside ? 0.45 : 1,
                   transition: "border-color .1s",
                 }}
-                onMouseOver={(e) => { if (!isToday) e.currentTarget.style.borderColor = "#cfd8d2" }}
-                onMouseOut={(e) => { e.currentTarget.style.borderColor = isToday ? "#1e6b45" : "#eef1ef" }}
+                onMouseOver={(e) => { if (!isToday) e.currentTarget.style.borderColor = "var(--me-line-3)" }}
+                onMouseOut={(e) => { e.currentTarget.style.borderColor = isToday ? "var(--me-green)" : "var(--me-mist)" }}
               >
                 <span
                   className="num"
                   style={{
                     fontSize: 13,
                     fontWeight: isToday ? 600 : isFuture || isOutside ? 400 : 500,
-                    color: isToday ? "#1e6b45" : isFuture ? "#5f6b65" : "#111814",
+                    color: isToday ? "var(--me-green)" : isFuture ? "var(--me-muted)" : "var(--me-ink)",
                   }}
                 >
                   {dayNum}
@@ -158,17 +158,17 @@ export function MonthView({
         </div>
 
         {/* Legend */}
-        <div style={{ marginTop: 14, display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, color: "#5f6b65" }}>
+        <div style={{ marginTop: 14, display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, color: "var(--me-muted)" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 14, height: 4, borderRadius: 99, background: "#1e6b45" }} />
+            <span style={{ width: 14, height: 4, borderRadius: 99, background: "var(--me-green)" }} />
             Within target
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 14, height: 4, borderRadius: 99, background: "#c2512e" }} />
+            <span style={{ width: 14, height: 4, borderRadius: 99, background: "var(--me-roast)" }} />
             Over target
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 14, height: 4, borderRadius: 99, background: "#b07d12" }} />
+            <span style={{ width: 14, height: 4, borderRadius: 99, background: "var(--me-grain)" }} />
             In progress
           </span>
         </div>

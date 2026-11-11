@@ -17,7 +17,7 @@ type Range = "day" | "week" | "month" | "progress"
 // ── Icons ────────────────────────────────────────────────────────────────────
 function LeafIcon() {
   return (
-    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f6faf7" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--me-on-green)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
       <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
     </svg>
@@ -51,6 +51,21 @@ function PlusIcon() {
     </svg>
   )
 }
+
+function ForkIcon() {
+  return (
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>
+    </svg>
+  )
+}
+
+const TABS = [
+  { id: "day", label: "Day", icon: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></> },
+  { id: "week", label: "Week", icon: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></> },
+  { id: "month", label: "Month", icon: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></> },
+  { id: "progress", label: "Progress", icon: <><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></> },
+] as const
 
 export default function App() {
   const today = isoToday()
@@ -192,20 +207,20 @@ export default function App() {
   }
 
   return (
-    <div style={{ fontFamily: "var(--font-sans)", color: "#111814", minHeight: "100vh", background: "#f7f8f7" }}>
+    <div className="app-shell" style={{ fontFamily: "var(--font-sans)", color: "var(--me-ink)", background: "var(--me-bg)" }}>
       {/* ── Header ── */}
-      <header style={{ borderBottom: "1px solid #e3e7e4", background: "rgba(255,255,255,.92)", position: "sticky", top: 0, zIndex: 40, backdropFilter: "blur(8px)" }}>
-        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "12px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+      <header className="app-header" style={{ borderBottom: "1px solid var(--me-line)", background: "var(--me-bar)", position: "sticky", top: 0, zIndex: 40 }}>
+        <div className="app-header-inner" style={{ maxWidth: 1120, margin: "0 auto", padding: "12px 24px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
           {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600, fontSize: 15 }}>
-            <span style={{ width: 28, height: 28, borderRadius: 8, background: "#1e6b45", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="app-brand" style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600, fontSize: 15 }}>
+            <span style={{ width: 28, height: 28, borderRadius: 8, background: "var(--me-green)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
               <LeafIcon />
             </span>
             Macro Engine
           </div>
 
           {/* Range nav */}
-          <nav aria-label="Range" className="pill-nav" style={{ marginLeft: 12 }}>
+          <nav aria-label="Range" className="pill-nav range-nav" style={{ marginLeft: 12 }}>
             {(["day", "week", "month", "progress"] as const).map((id) => (
               <button
                 key={id}
@@ -225,35 +240,42 @@ export default function App() {
           <button
             type="button"
             onClick={() => setFitMealOpen(true)}
-            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid #e3e7e4", background: "#fff", color: "#111814", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+            className="hdr-btn"
+            aria-label="Eating out?"
+            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
           >
-            Eating out?
+            <span className="hdr-icon-only"><ForkIcon /></span>
+            <span className="hdr-label">Eating out?</span>
           </button>
 
           {/* Targets */}
           <button
             type="button"
             onClick={() => setTargetsOpen(true)}
-            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid #e3e7e4", background: "#fff", color: "#111814", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+            className="hdr-btn"
+            aria-label="Targets"
+            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
           >
             <TargetIcon />
-            Targets
+            <span className="hdr-label">Targets</span>
           </button>
 
           {/* New food */}
           <button
             type="button"
             onClick={() => { setFoodName(""); setFoodOpen(true) }}
-            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid #1e6b45", background: "#1e6b45", color: "#f6faf7", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+            className="hdr-btn"
+            aria-label="New food"
+            style={{ font: "inherit", fontSize: 14, fontWeight: 500, height: 36, padding: "0 14px", borderRadius: 9, border: "1px solid var(--me-green)", background: "var(--me-green)", color: "var(--me-on-green)", display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}
           >
             <PlusIcon />
-            New food
+            <span className="hdr-label">New food</span>
           </button>
         </div>
       </header>
 
       {/* ── Main ── */}
-      <main style={{ maxWidth: 1120, margin: "0 auto", padding: "28px 24px 64px" }}>
+      <main className="app-main" style={{ maxWidth: 1120, margin: "0 auto", padding: "28px 24px 64px" }}>
 
         {/* Date header */}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -262,21 +284,21 @@ export default function App() {
               type="button"
               aria-label={`Previous ${mode}`}
               onClick={() => step(-1)}
-              style={{ width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid transparent", background: "transparent", color: "#111814", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              className="tap" style={{ width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid transparent", background: "transparent", color: "var(--me-ink)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
             >
               <ChevLeft />
             </button>
             <div>
               {showingToday && mode === "day" && (
-                <div style={{ fontSize: 12, color: "#5f6b65", textTransform: "uppercase", letterSpacing: ".06em" }}>Today</div>
+                <div style={{ fontSize: 12, color: "var(--me-muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>Today</div>
               )}
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, letterSpacing: "-.02em" }}>{rangeLabel}</h1>
+              <h1 className="range-title" style={{ margin: 0, fontSize: 24, fontWeight: 600, letterSpacing: "-.02em" }}>{rangeLabel}</h1>
             </div>
             <button
               type="button"
               aria-label={`Next ${mode}`}
               onClick={() => step(1)}
-              style={{ width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid transparent", background: "transparent", color: "#111814", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              className="tap" style={{ width: 36, height: 36, padding: 0, borderRadius: 9, border: "1px solid transparent", background: "transparent", color: "var(--me-ink)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
             >
               <ChevRight />
             </button>
@@ -287,14 +309,14 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setDate(today)}
-                style={{ font: "inherit", fontSize: 13, fontWeight: 500, height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #e3e7e4", background: "#fff", color: "#111814", cursor: "pointer" }}
+                style={{ font: "inherit", fontSize: 13, fontWeight: 500, height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)", cursor: "pointer" }}
               >
                 Today
               </button>
             )}
             {weekPaceBadge && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#1e6b45", background: "#e7f2ec", padding: "4px 10px", borderRadius: 999 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: "#1e6b45" }} />
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--me-green-text)", background: "var(--me-green-soft)", padding: "4px 10px", borderRadius: 999 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: "var(--me-green)" }} />
                 {weekPaceBadge}
               </span>
             )}
@@ -302,9 +324,10 @@ export default function App() {
         </div>
 
         {error && (
-          <p style={{ marginTop: 24, fontSize: 14, color: "#c2512e" }} role="alert">{error}</p>
+          <p style={{ marginTop: 24, fontSize: 14, color: "var(--me-roast)" }} role="alert">{error}</p>
         )}
 
+        <div key={mode} className="view-enter">
         {/* ── Day view ── */}
         {mode === "day" && day && day.date === date && week && (
           <DayView
@@ -348,10 +371,33 @@ export default function App() {
           <ProgressView date={date} onTargetsChanged={() => void load(date, mode)} />
         )}
 
+        </div>
+
         {!ready && !error && (
-          <p style={{ marginTop: 32, fontSize: 14, color: "#5f6b65" }}>Loading the {mode}…</p>
+          <p style={{ marginTop: 32, fontSize: 14, color: "var(--me-muted)" }}>Loading the {mode}…</p>
         )}
       </main>
+
+      {/* ── Bottom tab bar (phones) ── */}
+      <nav aria-label="Range" className="tabbar">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className="tabbar-item"
+            aria-current={mode === tab.id ? "page" : undefined}
+            onClick={() => {
+              if (mode === tab.id) window.scrollTo({ top: 0, behavior: "smooth" })
+              else { setMode(tab.id); window.scrollTo({ top: 0 }) }
+            }}
+          >
+            <svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={mode === tab.id ? 2.2 : 1.8} strokeLinecap="round" strokeLinejoin="round">
+              {tab.icon}
+            </svg>
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </nav>
 
       {/* ── Dialogs ── */}
       <FitMealDialog

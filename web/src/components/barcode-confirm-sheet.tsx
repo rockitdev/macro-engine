@@ -137,14 +137,14 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
       <div>
         <p style={{ margin: 0, fontSize: 18, fontWeight: 600, lineHeight: 1.3 }}>{food.name}</p>
         {food.brand && (
-          <p style={{ margin: "4px 0 0", fontSize: 14, color: "#5f6b65" }}>{food.brand}</p>
+          <p style={{ margin: "4px 0 0", fontSize: 14, color: "var(--me-muted)" }}>{food.brand}</p>
         )}
       </div>
 
       {/* Macros per 100 g */}
       <div style={{
         display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8,
-        padding: "12px 14px", borderRadius: 10, background: "#f7f8f7",
+        padding: "12px 14px", borderRadius: 10, background: "var(--me-bg)",
       }}>
         {[
           { label: "Calories", value: food.kcal, unit: "kcal" },
@@ -153,11 +153,11 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
           { label: "Fat", value: food.fat_g, unit: "g" },
         ].map(({ label, value, unit }) => (
           <div key={label} style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 12, color: "#5f6b65", marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: 12, color: "var(--me-muted)", marginBottom: 2 }}>{label}</div>
             <div style={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
               {value != null ? (unit === "kcal" ? formatKcal(value) : value) : "—"}
             </div>
-            <div style={{ fontSize: 11, color: "#8fa89a" }}>per 100 g</div>
+            <div style={{ fontSize: 11, color: "var(--me-faint-green)" }}>per 100 g</div>
           </div>
         ))}
       </div>
@@ -166,7 +166,7 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
       <div>
         <label
           htmlFor="barcode-qty"
-          style={{ display: "block", fontSize: 13, color: "#5f6b65", marginBottom: 6 }}
+          style={{ display: "block", fontSize: 13, color: "var(--me-muted)", marginBottom: 6 }}
         >
           {hasServing ? `Quantity (servings — ${food.portion_label ?? `${food.portion_grams} g each`})` : "Amount (grams)"}
         </label>
@@ -180,7 +180,7 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
           onChange={(e) => setQty(e.target.value)}
           style={{
             boxSizing: "border-box", width: "100%", height: 40,
-            border: "1px solid #d5dbd7", borderRadius: 9, padding: "0 12px",
+            border: "1px solid var(--me-line-strong)", borderRadius: 9, padding: "0 12px",
             font: "inherit", fontSize: 16, outline: "none",
           }}
         />
@@ -188,13 +188,13 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
 
       {/* Live macro preview */}
       {valid && macroSummary && (
-        <p style={{ margin: 0, fontSize: 13, color: "#5f6b65" }}>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--me-muted)" }}>
           {qtyNum} {unitLabel} → {macroSummary}
         </p>
       )}
 
       {error && (
-        <p style={{ margin: 0, fontSize: 14, color: "#c2512e" }} role="alert">{error}</p>
+        <p style={{ margin: 0, fontSize: 14, color: "var(--me-roast)" }} role="alert">{error}</p>
       )}
 
       {/* Actions */}
@@ -206,7 +206,7 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
           style={{
             font: "inherit", fontSize: 14, fontWeight: 500,
             height: 44, padding: "0 20px", borderRadius: 10,
-            border: "none", background: "#1e6b45", color: "#f6faf7",
+            border: "none", background: "var(--me-green)", color: "var(--me-on-green)",
             cursor: busy || !valid ? "not-allowed" : "pointer",
             opacity: busy || !valid ? 0.7 : 1,
             flex: 1,
@@ -221,7 +221,7 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
           style={{
             font: "inherit", fontSize: 14, fontWeight: 500,
             height: 44, padding: "0 16px", borderRadius: 10,
-            border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+            border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
             cursor: "pointer",
           }}
           title="Wrong product? Search manually"
@@ -235,7 +235,7 @@ export function BarcodeConfirmSheet({ food, date, meal, onLogged, onFallback, on
           style={{
             font: "inherit", fontSize: 14, fontWeight: 500,
             height: 44, padding: "0 16px", borderRadius: 10,
-            border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+            border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
             cursor: "pointer",
           }}
         >

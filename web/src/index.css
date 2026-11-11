@@ -98,52 +98,132 @@
     --sidebar-accent-foreground: #111814;
     --sidebar-border: #e3e7e4;
     --sidebar-ring: #1e6b45;
+
+    /* App palette — every component colour goes through these so dark mode works. */
+    --me-bg: #f7f8f7;
+    --me-surface: #ffffff;
+    --me-bar: rgba(255, 255, 255, 0.86);
+    --me-ink: #111814;
+    --me-muted: #5f6b65;
+    --me-faint: #9aa8a0;
+    --me-faint-green: #8fa89a;
+    --me-line: #e3e7e4;
+    --me-line-strong: #d5dbd7;
+    --me-line-3: #cfd8d2;
+    --me-mist: #eef1ef;
+    --me-green: #1e6b45;
+    --me-green-text: #1e6b45;
+    --me-on-green: #f6faf7;
+    --me-green-soft: #e7f2ec;
+    --me-green-faint: #f2f8f4;
+    --me-green-line: #cfe3d7;
+    --me-green-glow: rgba(30, 107, 69, 0.15);
+    --me-roast: #c2512e;
+    --me-over: #b03d17;
+    --me-grain: #b07d12;
+    --me-grain-ink: #8a5a00;
+    --me-grain-soft: #fbf1da;
+    --me-carbs-bg: #fbf6ea;
+    --me-carbs-fg: #6b4e0b;
+    --me-fat-bg: #fbeee9;
+    --me-fat-fg: #8a3518;
+    --me-fiber: #3f4a45;
+    --me-shadow: 0 1px 2px rgba(16, 24, 20, 0.04);
+
+    --tabbar-h: 56px;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --background: #0e1311;
+    --foreground: #e9efeb;
+    --card: #171d1a;
+    --card-foreground: #e9efeb;
+    --popover: #1b221f;
+    --popover-foreground: #e9efeb;
+    --primary: #26875a;
+    --primary-foreground: #f6faf7;
+    --secondary: #212925;
+    --secondary-foreground: #e9efeb;
+    --muted: #212925;
+    --muted-foreground: #98a69f;
+    --accent: #212925;
+    --accent-foreground: #e9efeb;
+    --destructive: #e2775a;
+    --border: #262e2a;
+    --input: #37413c;
+    --ring: #5cc594;
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar: #171d1a;
+    --sidebar-foreground: #e9efeb;
+    --sidebar-primary: #26875a;
+    --sidebar-primary-foreground: #f6faf7;
+    --sidebar-accent: #212925;
+    --sidebar-accent-foreground: #e9efeb;
+    --sidebar-border: #262e2a;
+    --sidebar-ring: #5cc594;
+
+    --me-bg: #0e1311;
+    --me-surface: #171d1a;
+    --me-bar: rgba(14, 19, 17, 0.82);
+    --me-ink: #e9efeb;
+    --me-muted: #98a69f;
+    --me-faint: #6b7972;
+    --me-faint-green: #5f7a6c;
+    --me-line: #262e2a;
+    --me-line-strong: #37413c;
+    --me-line-3: #37413c;
+    --me-mist: #222a26;
+    --me-green: #26875a;
+    --me-green-text: #5cc594;
+    --me-on-green: #f6faf7;
+    --me-green-soft: #183226;
+    --me-green-faint: #14231c;
+    --me-green-line: #2a4a3a;
+    --me-green-glow: rgba(92, 197, 148, 0.22);
+    --me-roast: #e2775a;
+    --me-over: #ea8468;
+    --me-grain: #d2a13a;
+    --me-grain-ink: #e0b352;
+    --me-grain-soft: #33290f;
+    --me-carbs-bg: #2a2310;
+    --me-carbs-fg: #e3c276;
+    --me-fat-bg: #331c14;
+    --me-fat-fg: #f0a58d;
+    --me-fiber: #8d9a94;
+    --me-shadow: none;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
     color-scheme: light;
+    background: var(--background);
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+  }
+  /* Controls behave like app controls, not page text. */
+  button,
+  [role="button"],
+  nav,
+  summary {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
   }
 }
 
@@ -154,10 +234,44 @@
 
 /* Card style */
 .me-card {
-  background: #fff;
-  border: 1px solid #e3e7e4;
+  background: var(--me-surface);
+  border: 1px solid var(--me-line);
   border-radius: 14px;
-  box-shadow: 0 1px 2px rgba(16, 24, 20, 0.04);
+  box-shadow: var(--me-shadow);
+}
+
+/* ── App shell ─────────────────────────────────────────────────────────── */
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.app-header {
+  padding-top: env(safe-area-inset-top);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+.app-header-inner,
+.app-main {
+  padding-left: max(24px, env(safe-area-inset-left)) !important;
+  padding-right: max(24px, env(safe-area-inset-right)) !important;
+}
+.hdr-icon-only {
+  display: none;
+}
+.tabbar {
+  display: none;
+}
+
+/* View change: quick fade-up, like a tab switch. */
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.view-enter {
+  animation: view-enter 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-enter { animation: none; }
 }
 
 /* Responsive two-column day view */
@@ -173,24 +287,11 @@
   }
 }
 
-/* Phone: sticky header with nav inside */
-@media (max-width: 640px) {
-  header nav.pill-nav {
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-    width: 100%;
-    margin-left: 0 !important;
-  }
-  .pill-nav-item {
-    justify-content: center;
-  }
-}
-
 /* Pill nav (range switcher) */
 .pill-nav {
   display: inline-flex;
   padding: 3px;
-  background: #eef1ef;
+  background: var(--me-mist);
   border-radius: 10px;
   gap: 2px;
 }
@@ -202,13 +303,170 @@
   font-weight: 500;
   border: none;
   background: transparent;
-  color: #5f6b65;
+  color: var(--me-muted);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
 }
 .pill-nav-item[aria-selected="true"] {
-  background: #fff;
-  color: #111814;
+  background: var(--me-surface);
+  color: var(--me-ink);
   box-shadow: 0 1px 2px rgba(0,0,0,.08);
+}
+.dark .pill-nav-item[aria-selected="true"] {
+  background: #37413c;
+}
+
+/* ── Phone layout ──────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* One compact header row: brand left, icon actions right. */
+  .app-header-inner {
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+    padding-left: max(16px, env(safe-area-inset-left)) !important;
+    padding-right: max(16px, env(safe-area-inset-right)) !important;
+  }
+  .range-nav {
+    display: none !important;
+  }
+  .hdr-label {
+    display: none;
+  }
+  .hdr-icon-only {
+    display: inline-flex;
+  }
+  .hdr-btn {
+    width: 40px !important;
+    height: 40px !important;
+    padding: 0 !important;
+    justify-content: center;
+    border-radius: 12px !important;
+    flex: none;
+  }
+  .hdr-btn svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .app-main {
+    padding-top: 16px !important;
+    padding-left: max(16px, env(safe-area-inset-left)) !important;
+    padding-right: max(16px, env(safe-area-inset-right)) !important;
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 28px) !important;
+  }
+  .range-title {
+    font-size: 20px !important;
+  }
+  .tap {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  /* Bottom tab bar */
+  .tabbar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    padding: 0 max(8px, env(safe-area-inset-left)) env(safe-area-inset-bottom) max(8px, env(safe-area-inset-right));
+    background: var(--me-bar);
+    border-top: 1px solid var(--me-line);
+    -webkit-backdrop-filter: saturate(180%) blur(14px);
+    backdrop-filter: saturate(180%) blur(14px);
+  }
+  .tabbar-item {
+    height: var(--tabbar-h);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    border: none;
+    background: transparent;
+    color: var(--me-muted);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+  }
+  .tabbar-item[aria-current="page"] {
+    color: var(--me-green-text);
+  }
+
+  /* Ring card: ring beside the totals, macro bars full width beneath. */
+  .ring-card {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 20px !important;
+    padding: 20px !important;
+  }
+  .ring-detail {
+    display: contents;
+  }
+  .ring-totals {
+    flex-direction: column;
+    gap: 14px !important;
+    align-self: center;
+  }
+  .ring-bars {
+    grid-column: 1 / -1;
+    margin-top: 0 !important;
+  }
+
+  .day-view-grid {
+    margin-top: 16px !important;
+    gap: 16px !important;
+  }
+
+  /* Week/month summary cards: one row each (label left, figure right). */
+  .stat-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .stat-grid > .me-card {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px !important;
+  }
+  .stat-grid > .me-card > .num {
+    font-size: 22px !important;
+    text-align: right;
+  }
+}
+
+/* ── Touch devices ─────────────────────────────────────────────────────── */
+@media (pointer: coarse) {
+  /* iOS zooms the page when a focused field is under 16px. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  .pill-nav-item {
+    min-height: 36px;
+  }
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    min-height: 44px;
+  }
+}
+@media (hover: none) {
+  button {
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+  button:active:not(:disabled) {
+    opacity: 0.6;
+  }
+  .tabbar-item:active:not(:disabled) {
+    opacity: 1;
+    transform: scale(0.94);
+  }
 }

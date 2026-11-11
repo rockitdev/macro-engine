@@ -5,6 +5,10 @@
 # origin/main; when that tip moves it rebuilds web/dist and restarts the app.
 # Safe to run on a timer: it exits quickly when there is nothing new.
 #
+# The checkout also carries its own .venv (from requirements.txt) so the MCP
+# server can be registered against main rather than a working tree:
+#   ~/deploy/macro-engine/.venv/bin/python ~/deploy/macro-engine/mcp_server.py
+#
 #   scripts/deploy-app.sh            deploy if origin/main has moved
 #   FORCE=1 scripts/deploy-app.sh    rebuild and restart regardless
 #
@@ -57,7 +61,29 @@ main() {
   fi
 
   echo "deploy: ${have:0:7} -> ${want:0:7} ($ref)"
+  local self="$app_dir/scripts/deploy-app.sh" before after
+  before="$(sha256sum "$self" 2>/dev/null | cut -d' ' -f1 || true)"
   git checkout --quiet --force --detach "$want"
+  after="$(sha256sum "$self" | cut -d' ' -f1)"
+  # If this deploy changed the deploy script itself, hand over to the new one
+  # so its steps apply now rather than on the following deploy.
+  if [ "$before" != "$after" ] && [ -z "${MACRO_ENGINE_DEPLOY_REEXEC:-}" ] \
+    && [ "$(readlink -f "${BASH_SOURCE[0]}")" = "$(readlink -f "$self")" ]; then
+    echo "deploy: deploy script changed; re-running the new version"
+    exec env MACRO_ENGINE_DEPLOY_REEXEC=1 FORCE=1 "$self" "$@"
+  fi
+
+  # Python environment for the MCP server (stdlib + the mcp package). Rebuilt
+  # only when requirements.txt changes.
+  local req_hash
+  req_hash="$(sha256sum requirements.txt | cut -d' ' -f1)"
+  if [ ! -x .venv/bin/python ] || [ "$(cat .venv/.requirements-sha 2>/dev/null || true)" != "$req_hash" ]; then
+    echo "deploy: installing Python requirements into .venv"
+    [ -x .venv/bin/python ] || python3 -m venv .venv
+    .venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt
+    echo "$req_hash" > .venv/.requirements-sha
+  fi
+  .venv/bin/python -c "import mcp_server" >/dev/null
 
   # Build into dist.next and swap, so a failed or in-progress build never
   # replaces the bundle being served. Runs as the container's root, which

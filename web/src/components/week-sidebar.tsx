@@ -42,7 +42,7 @@ export function WeekSidebar({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>This week</h2>
-          <div style={{ fontSize: 13, color: "#5f6b65", marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: "var(--me-muted)", marginTop: 2 }}>
             {formatSpan(week.start, week.end)}
           </div>
         </div>
@@ -53,7 +53,7 @@ export function WeekSidebar({
             onChange={(e) => void onWeekStart(e.target.value)}
             style={{
               appearance: "none", height: 30, paddingLeft: 10, paddingRight: 24, fontSize: 13, fontWeight: 500,
-              border: "1px solid #e3e7e4", borderRadius: 8, background: "#fff", color: "#111814",
+              border: "1px solid var(--me-line)", borderRadius: 8, background: "var(--me-surface)", color: "var(--me-ink)",
               cursor: "pointer", outline: "none",
             }}
           >
@@ -68,13 +68,13 @@ export function WeekSidebar({
       {/* Saved carbs / fat cards */}
       {(carbSaved !== 0 || fatSaved !== 0) && (
         <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-          <div style={{ padding: 12, borderRadius: 10, background: "#fbf6ea" }}>
-            <div style={{ fontSize: 13, color: "#6b4e0b" }}>{carbSaved >= 0 ? "Carbs saved" : "Carbs over"}</div>
-            <div className="num" style={{ fontSize: 22, fontWeight: 600, color: "#6b4e0b" }}>{formatGrams(Math.abs(carbSaved))} g</div>
+          <div style={{ padding: 12, borderRadius: 10, background: "var(--me-carbs-bg)" }}>
+            <div style={{ fontSize: 13, color: "var(--me-carbs-fg)" }}>{carbSaved >= 0 ? "Carbs saved" : "Carbs over"}</div>
+            <div className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--me-carbs-fg)" }}>{formatGrams(Math.abs(carbSaved))} g</div>
           </div>
-          <div style={{ padding: 12, borderRadius: 10, background: "#fbeee9" }}>
-            <div style={{ fontSize: 13, color: "#8a3518" }}>{fatSaved >= 0 ? "Fat saved" : "Fat over"}</div>
-            <div className="num" style={{ fontSize: 22, fontWeight: 600, color: "#8a3518" }}>{formatGrams(Math.abs(fatSaved))} g</div>
+          <div style={{ padding: 12, borderRadius: 10, background: "var(--me-fat-bg)" }}>
+            <div style={{ fontSize: 13, color: "var(--me-fat-fg)" }}>{fatSaved >= 0 ? "Fat saved" : "Fat over"}</div>
+            <div className="num" style={{ fontSize: 22, fontWeight: 600, color: "var(--me-fat-fg)" }}>{formatGrams(Math.abs(fatSaved))} g</div>
           </div>
         </div>
       )}
@@ -115,14 +115,14 @@ export function WeekSidebar({
                   all: "unset", boxSizing: "border-box", width: "100%",
                   display: "flex", flexDirection: "column", alignItems: "center",
                   gap: 6, padding: "6px 0", borderRadius: 8, cursor: "pointer",
-                  background: isToday ? "#e7f2ec" : "transparent",
+                  background: isToday ? "var(--me-green-soft)" : "transparent",
                 }}
               >
                 <span
                   style={{
                     height: 64, width: 10, borderRadius: 99,
-                    background: showTrack ? "#eef1ef" : "transparent",
-                    border: future ? "1px dashed #d5dbd7" : "none",
+                    background: showTrack ? "var(--me-mist)" : "transparent",
+                    border: future ? "1px dashed var(--me-line-strong)" : "none",
                     boxSizing: "border-box",
                     display: "flex", alignItems: "flex-end",
                     overflow: "hidden",
@@ -132,7 +132,7 @@ export function WeekSidebar({
                     <span
                       style={{
                         width: "100%", borderRadius: 99,
-                        background: over ? "#c2512e" : "#b07d12",
+                        background: over ? "var(--me-roast)" : "var(--me-grain)",
                         height: `${ratio * 100}%`,
                       }}
                     />
@@ -141,7 +141,7 @@ export function WeekSidebar({
                 <span
                   style={{
                     fontSize: 12,
-                    color: isToday ? "#1e6b45" : "#5f6b65",
+                    color: isToday ? "var(--me-green)" : "var(--me-muted)",
                     fontWeight: isToday ? 600 : 400,
                   }}
                 >
@@ -155,16 +155,16 @@ export function WeekSidebar({
 
       {/* Protein bar */}
       {proteinTarget != null && (
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #eef1ef" }}>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--me-mist)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
             <span>Protein this week</span>
-            <span className="num" style={{ color: "#5f6b65" }}>
+            <span className="num" style={{ color: "var(--me-muted)" }}>
               {formatGrams(proteinEaten)} / {formatGrams(proteinTarget)} g
             </span>
           </div>
-          <div style={{ marginTop: 6, height: 6, borderRadius: 99, background: "#eef1ef", overflow: "hidden" }}>
+          <div style={{ marginTop: 6, height: 6, borderRadius: 99, background: "var(--me-mist)", overflow: "hidden" }}>
             <div style={{
-              height: "100%", borderRadius: 99, background: "#1e6b45",
+              height: "100%", borderRadius: 99, background: "var(--me-green)",
               width: `${Math.min(100, (proteinEaten / proteinTarget) * 100)}%`,
             }} />
           </div>

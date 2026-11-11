@@ -37,7 +37,7 @@ function parseOptNum(s: string): number | null {
 function RoleBadge({ role }: { role: FitItemRole }) {
   if (role === "other") return null  // uncategorised items get no badge
   const label = role === "main" ? "Main" : role === "side" ? "Side" : "Drink"
-  // Styled to match the existing chip / MacroRow pattern (Geist, #1e6b45 spinach green for main)
+  // Styled to match the existing chip / MacroRow pattern (Geist, var(--me-green) spinach green for main)
   const cls =
     role === "main"
       ? "bg-spinach/15 text-spinach"

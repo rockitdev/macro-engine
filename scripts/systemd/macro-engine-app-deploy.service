@@ -1,0 +1,7 @@
+[Unit]
+Description=Deploy macro-engine origin/main as the installed app (port 4332)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/deploy/macro-engine/scripts/deploy-app.sh

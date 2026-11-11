@@ -2,10 +2,10 @@ import { formatGrams, formatKcal } from "@/lib/format"
 import type { Day } from "@/types"
 
 const MACROS = [
-  { key: "protein_g" as const, label: "Protein", color: "#1e6b45" },
-  { key: "carb_g"   as const, label: "Carbs",   color: "#b07d12" },
-  { key: "fat_g"    as const, label: "Fat",      color: "#c2512e" },
-  { key: "fiber_g"  as const, label: "Fiber",    color: "#3f4a45" },
+  { key: "protein_g" as const, label: "Protein", color: "var(--me-green-text)" },
+  { key: "carb_g"   as const, label: "Carbs",   color: "var(--me-grain)" },
+  { key: "fat_g"    as const, label: "Fat",      color: "var(--me-roast)" },
+  { key: "fiber_g"  as const, label: "Fiber",    color: "var(--me-fiber)" },
 ]
 
 // SVG ring params
@@ -28,7 +28,7 @@ export function MacroRing({ day }: { day: Day }) {
 
   return (
     <section
-      className="me-card"
+      className="me-card ring-card"
       style={{ padding: 24, display: "flex", flexWrap: "wrap", gap: 28, alignItems: "center" }}
       aria-label="Today's nutrition summary"
     >
@@ -43,12 +43,12 @@ export function MacroRing({ day }: { day: Day }) {
           height="168"
           viewBox="0 0 168 168"
         >
-          <circle cx={CX} cy={CY} r={R} fill="none" stroke="#eef1ef" strokeWidth="14" />
+          <circle cx={CX} cy={CY} r={R} fill="none" stroke="var(--me-mist)" strokeWidth="14" />
           {progress > 0 && (
             <circle
               cx={CX} cy={CY} r={R}
               fill="none"
-              stroke={over ? "#c2512e" : "#1e6b45"}
+              stroke={over ? "var(--me-roast)" : "var(--me-green)"}
               strokeWidth="14"
               strokeLinecap="round"
               strokeDasharray={`${dashFilled} ${dashRest}`}
@@ -66,39 +66,39 @@ export function MacroRing({ day }: { day: Day }) {
             <>
               <div
                 className="num"
-                style={{ fontSize: 38, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1, color: over ? "#c2512e" : "#111814" }}
+                style={{ fontSize: 38, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1, color: over ? "var(--me-roast)" : "var(--me-ink)" }}
               >
                 {formatKcal(Math.abs(left))}
               </div>
-              <div style={{ marginTop: 4, fontSize: 13, color: "#5f6b65" }}>{over ? "kcal over" : "kcal left"}</div>
+              <div style={{ marginTop: 4, fontSize: 13, color: "var(--me-muted)" }}>{over ? "kcal over" : "kcal left"}</div>
             </>
           ) : (
             <>
               <div className="num" style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-.03em", lineHeight: 1 }}>
                 {formatKcal(eaten)}
               </div>
-              <div style={{ marginTop: 4, fontSize: 13, color: "#5f6b65" }}>kcal eaten</div>
+              <div style={{ marginTop: 4, fontSize: 13, color: "var(--me-muted)" }}>kcal eaten</div>
             </>
           )}
         </div>
       </div>
 
       {/* Eaten / Target + macro bars */}
-      <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+      <div className="ring-detail" style={{ flex: "1 1 260px", minWidth: 0 }}>
         {target != null && (
-          <div style={{ display: "flex", gap: 24 }}>
+          <div className="ring-totals" style={{ display: "flex", gap: 24 }}>
             <div>
-              <div style={{ fontSize: 13, color: "#5f6b65" }}>Eaten</div>
+              <div style={{ fontSize: 13, color: "var(--me-muted)" }}>Eaten</div>
               <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{formatKcal(eaten)}</div>
             </div>
             <div>
-              <div style={{ fontSize: 13, color: "#5f6b65" }}>Target</div>
+              <div style={{ fontSize: 13, color: "var(--me-muted)" }}>Target</div>
               <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{formatKcal(target)}</div>
             </div>
           </div>
         )}
 
-        <div style={{ marginTop: target != null ? 20 : 0, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px 20px" }}>
+        <div className="ring-bars" style={{ marginTop: target != null ? 20 : 0, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px 20px" }}>
           {MACROS.map(({ key, label, color }) => {
             const goal   = day.targets?.[key] ?? null
             const have   = day.eaten[key]
@@ -113,7 +113,7 @@ export function MacroRing({ day }: { day: Day }) {
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
                     {label}
                   </span>
-                  <span className="num" style={{ color: isOver ? "#b03d17" : "#5f6b65" }}>
+                  <span className="num" style={{ color: isOver ? "var(--me-over)" : "var(--me-muted)" }}>
                     {remain == null
                       ? `${formatGrams(have)} g`
                       : isOver
@@ -121,19 +121,19 @@ export function MacroRing({ day }: { day: Day }) {
                         : `${formatGrams(remain)} g left`}
                   </span>
                 </div>
-                <div style={{ marginTop: 6, height: 8, borderRadius: 99, background: "#eef1ef", overflow: "hidden" }}>
+                <div style={{ marginTop: 6, height: 8, borderRadius: 99, background: "var(--me-mist)", overflow: "hidden" }}>
                   {goal != null && (
                     <div
                       style={{
                         width: `${width}%`, height: "100%",
-                        background: isOver ? "#c2512e" : color,
+                        background: isOver ? "var(--me-roast)" : color,
                         borderRadius: 99,
                       }}
                     />
                   )}
                 </div>
                 {goal != null && (
-                  <div className="num" style={{ marginTop: 4, fontSize: 12, color: "#5f6b65" }}>
+                  <div className="num" style={{ marginTop: 4, fontSize: 12, color: "var(--me-muted)" }}>
                     {formatGrams(have)} / {formatGrams(goal)} g
                   </div>
                 )}

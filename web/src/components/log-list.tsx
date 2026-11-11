@@ -46,9 +46,9 @@ export function LogList({
       <section className="me-card" style={{ padding: "8px 0" }}>
         <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Eaten</h2>
-          <span className="num" style={{ fontSize: 13, color: "#5f6b65" }}>0 items</span>
+          <span className="num" style={{ fontSize: 13, color: "var(--me-muted)" }}>0 items</span>
         </div>
-        <p style={{ padding: "4px 20px 16px", fontSize: 14, color: "#5f6b65" }}>Nothing logged yet.</p>
+        <p style={{ padding: "4px 20px 16px", fontSize: 14, color: "var(--me-muted)" }}>Nothing logged yet.</p>
       </section>
     )
   }
@@ -57,7 +57,7 @@ export function LogList({
     <section className="me-card" style={{ padding: "8px 0" }}>
       <div style={{ padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Eaten</h2>
-        <span className="num" style={{ fontSize: 13, color: "#5f6b65" }}>
+        <span className="num" style={{ fontSize: 13, color: "var(--me-muted)" }}>
           {entries.length} {entries.length === 1 ? "item" : "items"}
         </span>
       </div>
@@ -69,16 +69,16 @@ export function LogList({
             {/* Section header */}
             <div style={{
               padding: "8px 20px",
-              background: "#f7f8f7",
-              borderTop: "1px solid #eef1ef",
-              borderBottom: "1px solid #eef1ef",
+              background: "var(--me-bg)",
+              borderTop: "1px solid var(--me-mist)",
+              borderBottom: "1px solid var(--me-mist)",
               display: "flex",
               justifyContent: "space-between",
               fontSize: 12,
               fontWeight: 500,
               textTransform: "uppercase",
               letterSpacing: ".05em",
-              color: "#5f6b65",
+              color: "var(--me-muted)",
             }}>
               <span>{group.label}</span>
               <span className="num">{formatKcal(kcal)} kcal</span>
@@ -97,7 +97,7 @@ export function LogList({
                     display: "flex",
                     gap: 12,
                     alignItems: "center",
-                    borderBottom: isLast ? "none" : "1px solid #eef1ef",
+                    borderBottom: isLast ? "none" : "1px solid var(--me-mist)",
                     opacity: isPending ? 0.5 : 1,
                     position: "relative",
                   }}
@@ -107,12 +107,12 @@ export function LogList({
                     <div style={{ fontSize: 14, fontWeight: 500, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       {entry.name}
                       {entry.estimated && (
-                        <span style={{ fontSize: 11, fontWeight: 500, color: "#8a5a00", background: "#fbf1da", padding: "1px 7px", borderRadius: 99 }}>
+                        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--me-grain-ink)", background: "var(--me-grain-soft)", padding: "1px 7px", borderRadius: 99 }}>
                           Estimate
                         </span>
                       )}
                     </div>
-                    <div className="num" style={{ fontSize: 12, color: "#5f6b65", marginTop: 2 }}>
+                    <div className="num" style={{ fontSize: 12, color: "var(--me-muted)", marginTop: 2 }}>
                       {entry.qty_desc && <>{entry.qty_desc} · </>}
                       P {formatGrams(entry.protein_g)} · C {formatGrams(entry.carb_g)} · F {formatGrams(entry.fat_g)}
                     </div>
@@ -133,7 +133,7 @@ export function LogList({
                         all: "unset", boxSizing: "border-box",
                         width: 32, height: 32, borderRadius: 8,
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        cursor: "pointer", color: "#5f6b65",
+                        cursor: "pointer", color: "var(--me-muted)",
                       }}
                     >
                       <DotsIcon />
@@ -142,7 +142,7 @@ export function LogList({
                       <div
                         style={{
                           position: "absolute", right: 0, top: "calc(100% + 4px)",
-                          background: "#fff", border: "1px solid #e3e7e4",
+                          background: "var(--me-surface)", border: "1px solid var(--me-line)",
                           borderRadius: 10, padding: 4, zIndex: 10,
                           boxShadow: "0 4px 12px rgba(0,0,0,.1)",
                           minWidth: 160,
@@ -159,22 +159,22 @@ export function LogList({
                               padding: "7px 12px", borderRadius: 7, fontSize: 14, cursor: "pointer",
                               display: "block",
                             }}
-                            onMouseOver={(e) => (e.currentTarget.style.background = "#f7f8f7")}
+                            onMouseOver={(e) => (e.currentTarget.style.background = "var(--me-bg)")}
                             onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
                           >
                             Move to {m.label}
                           </button>
                         ))}
-                        <div style={{ height: 1, background: "#eef1ef", margin: "4px 0" }} />
+                        <div style={{ height: 1, background: "var(--me-mist)", margin: "4px 0" }} />
                         <button
                           type="button"
                           onClick={() => { onRemove(entry.log_id); setOpenMenu(null) }}
                           style={{
                             all: "unset", boxSizing: "border-box", width: "100%",
                             padding: "7px 12px", borderRadius: 7, fontSize: 14, cursor: "pointer",
-                            display: "block", color: "#c2512e",
+                            display: "block", color: "var(--me-roast)",
                           }}
-                          onMouseOver={(e) => (e.currentTarget.style.background = "#fbeee9")}
+                          onMouseOver={(e) => (e.currentTarget.style.background = "var(--me-fat-bg)")}
                           onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
                         >
                           Remove

@@ -97,7 +97,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
         style={{
           font: "inherit", fontSize: 14, fontWeight: 500,
           height: 36, padding: "0 14px", borderRadius: 9,
-          border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+          border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
           display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer",
         }}
       >
@@ -120,7 +120,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
           )}
 
           {flow.kind === "looking-up" && (
-            <p style={{ fontSize: 14, color: "#5f6b65", margin: 0 }}>
+            <p style={{ fontSize: 14, color: "var(--me-muted)", margin: 0 }}>
               Looking up barcode {flow.barcode}…
             </p>
           )}
@@ -138,7 +138,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
 
           {flow.kind === "not-found" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <p style={{ margin: 0, fontSize: 14, color: "#5f6b65" }}>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--me-muted)" }}>
                 Barcode <strong>{flow.barcode}</strong> was not found in Open Food Facts.
                 You can search for the food manually instead.
               </p>
@@ -149,7 +149,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
                   style={{
                     font: "inherit", fontSize: 14, fontWeight: 500,
                     height: 40, padding: "0 16px", borderRadius: 10,
-                    border: "none", background: "#1e6b45", color: "#f6faf7",
+                    border: "none", background: "var(--me-green)", color: "var(--me-on-green)",
                     cursor: "pointer",
                   }}
                 >
@@ -161,7 +161,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
                   style={{
                     font: "inherit", fontSize: 14, fontWeight: 500,
                     height: 40, padding: "0 16px", borderRadius: 10,
-                    border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+                    border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
                     cursor: "pointer",
                   }}
                 >
@@ -173,7 +173,7 @@ export function BarcodeFlow({ date, meal, onLogged, onFallback }: Props) {
                   style={{
                     font: "inherit", fontSize: 14, fontWeight: 500,
                     height: 40, padding: "0 16px", borderRadius: 10,
-                    border: "1px solid #e3e7e4", background: "#fff", color: "#111814",
+                    border: "1px solid var(--me-line)", background: "var(--me-surface)", color: "var(--me-ink)",
                     cursor: "pointer",
                   }}
                 >

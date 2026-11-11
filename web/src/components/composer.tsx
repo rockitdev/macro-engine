@@ -109,9 +109,9 @@ const btnBase: React.CSSProperties = {
   height: 36,
   padding: "0 14px",
   borderRadius: 9,
-  border: "1px solid #e3e7e4",
-  background: "#fff",
-  color: "#111814",
+  border: "1px solid var(--me-line)",
+  background: "var(--me-surface)",
+  color: "var(--me-ink)",
   display: "inline-flex",
   alignItems: "center",
   gap: 8,
@@ -338,7 +338,7 @@ export function Composer({
             aria-hidden="true"
             style={{ position: "absolute", left: 12, top: 12, pointerEvents: "none" }}
             width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="#5f6b65" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            stroke="var(--me-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
           >
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
           </svg>
@@ -349,8 +349,8 @@ export function Composer({
             placeholder="Search foods"
             style={{
               boxSizing: "border-box", width: "100%", height: 40,
-              border: selected ? "1px solid #1e6b45" : "1px solid #d5dbd7",
-              boxShadow: selected ? "0 0 0 3px rgba(30,107,69,.15)" : "none",
+              border: selected ? "1px solid var(--me-green)" : "1px solid var(--me-line-strong)",
+              boxShadow: selected ? "0 0 0 3px var(--me-green-glow)" : "none",
               borderRadius: 10, padding: "0 12px 0 36px",
               font: "inherit", fontSize: 14, outline: "none",
             }}
@@ -372,7 +372,7 @@ export function Composer({
         {!selected && results.length > 0 && (
           <ul
             role="listbox"
-            style={{ listStyle: "none", margin: "8px 0 0", padding: 4, border: "1px solid #e3e7e4", borderRadius: 10 }}
+            style={{ listStyle: "none", margin: "8px 0 0", padding: 4, border: "1px solid var(--me-line)", borderRadius: 10 }}
           >
             {results.map((food, index) => (
               <li key={food.id}>
@@ -384,7 +384,7 @@ export function Composer({
                     all: "unset", boxSizing: "border-box", width: "100%",
                     display: "flex", justifyContent: "space-between", gap: 12,
                     padding: "8px 10px", borderRadius: 7,
-                    background: index === active ? "#eef1ef" : "transparent",
+                    background: index === active ? "var(--me-mist)" : "transparent",
                     cursor: "pointer",
                   }}
                   onMouseEnter={() => setActive(index)}
@@ -392,12 +392,12 @@ export function Composer({
                 >
                   <span>
                     <span style={{ display: "block", fontSize: 14, fontWeight: 500 }}>{food.name}</span>
-                    <span style={{ display: "block", fontSize: 12, color: "#5f6b65" }}><FoodSubtitle food={food} /></span>
+                    <span style={{ display: "block", fontSize: 12, color: "var(--me-muted)" }}><FoodSubtitle food={food} /></span>
                   </span>
                   {food.matched_alias && (
                     <span style={{
                       alignSelf: "center", fontSize: 11, fontWeight: 500,
-                      color: "#1e6b45", background: "#e7f2ec",
+                      color: "var(--me-green-text)", background: "var(--me-green-soft)",
                       padding: "2px 8px", borderRadius: 99,
                     }}>
                       Saved name
@@ -410,11 +410,11 @@ export function Composer({
         )}
 
         {!selected && !searching && query.trim().length >= 2 && results.length === 0 && (
-          <p style={{ marginTop: 12, fontSize: 14, color: "#5f6b65" }}>
+          <p style={{ marginTop: 12, fontSize: 14, color: "var(--me-muted)" }}>
             No food matches.{" "}
             <button
               type="button"
-              style={{ background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: "#1e6b45", cursor: "pointer", textDecoration: "underline" }}
+              style={{ background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: "var(--me-green-text)", cursor: "pointer", textDecoration: "underline" }}
               onClick={() => onAddFood(query.trim())}
             >
               Add it
@@ -425,14 +425,14 @@ export function Composer({
         {/* Amount / unit / log controls */}
         {selected && choice && (
           <div style={{
-            marginTop: 14, padding: 14, borderRadius: 10, background: "#f7f8f7",
+            marginTop: 14, padding: 14, borderRadius: 10, background: "var(--me-bg)",
             display: "grid",
             gridTemplateColumns: "110px minmax(0, 1fr) auto",
             gap: 10, alignItems: "end",
           }}>
             {/* Amount */}
             <div>
-              <label style={{ display: "block", fontSize: 13, color: "#5f6b65", marginBottom: 6 }} htmlFor="food-qty">Amount</label>
+              <label style={{ display: "block", fontSize: 13, color: "var(--me-muted)", marginBottom: 6 }} htmlFor="food-qty">Amount</label>
               <input
                 id="food-qty"
                 inputMode="decimal"
@@ -440,15 +440,15 @@ export function Composer({
                 onChange={(e) => setQty(e.target.value)}
                 style={{
                   boxSizing: "border-box", width: "100%", height: 36,
-                  border: "1px solid #d5dbd7", borderRadius: 9, padding: "0 10px",
-                  font: "inherit", fontSize: 14, background: "#fff", outline: "none",
+                  border: "1px solid var(--me-line-strong)", borderRadius: 9, padding: "0 10px",
+                  font: "inherit", fontSize: 14, background: "var(--me-surface)", outline: "none",
                 }}
               />
             </div>
 
             {/* Unit */}
             <div>
-              <label style={{ display: "block", fontSize: 13, color: "#5f6b65", marginBottom: 6 }} htmlFor="food-unit">Unit</label>
+              <label style={{ display: "block", fontSize: 13, color: "var(--me-muted)", marginBottom: 6 }} htmlFor="food-unit">Unit</label>
               <div style={{ position: "relative" }}>
                 <select
                   id="food-unit"
@@ -456,9 +456,9 @@ export function Composer({
                   onChange={(e) => selectUnit(e.target.value)}
                   style={{
                     appearance: "none", boxSizing: "border-box", width: "100%", height: 36,
-                    border: "1px solid #d5dbd7", borderRadius: 9, padding: "0 28px 0 10px",
-                    font: "inherit", fontSize: 14, background: "#fff",
-                    color: "#111814", outline: "none", cursor: "pointer",
+                    border: "1px solid var(--me-line-strong)", borderRadius: 9, padding: "0 28px 0 10px",
+                    font: "inherit", fontSize: 14, background: "var(--me-surface)",
+                    color: "var(--me-ink)", outline: "none", cursor: "pointer",
                   }}
                 >
                   {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -479,7 +479,7 @@ export function Composer({
               disabled={busy}
               style={{
                 ...btnBase,
-                background: "#1e6b45", borderColor: "#1e6b45", color: "#f6faf7",
+                background: "var(--me-green)", borderColor: "var(--me-green)", color: "var(--me-on-green)",
                 opacity: busy ? 0.7 : 1, minWidth: 0,
               }}
             >
@@ -488,7 +488,7 @@ export function Composer({
 
             {/* Preview row */}
             {previewText && (
-              <div className="num" style={{ gridColumn: "1 / -1", fontSize: 13, color: "#5f6b65" }}>
+              <div className="num" style={{ gridColumn: "1 / -1", fontSize: 13, color: "var(--me-muted)" }}>
                 {previewText}
               </div>
             )}
@@ -509,9 +509,9 @@ export function Composer({
       {/* Problems / notices */}
       {problem && (
         <div style={{ marginTop: 12, fontSize: 14 }} role="alert">
-          <p style={{ color: "#c2512e" }}>{problem.reason}</p>
+          <p style={{ color: "var(--me-roast)" }}>{problem.reason}</p>
           {problem.available_portions && problem.available_portions.length > 0 && (
-            <p style={{ marginTop: 4, color: "#5f6b65" }}>Portions: {problem.available_portions.join(", ")}</p>
+            <p style={{ marginTop: 4, color: "var(--me-muted)" }}>Portions: {problem.available_portions.join(", ")}</p>
           )}
           {problem.candidates && problem.candidates.length > 0 && (
             <ul style={{ marginTop: 8, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
@@ -519,7 +519,7 @@ export function Composer({
                 <li key={c.food_id}>
                   <button
                     type="button"
-                    style={{ background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: "#1e6b45", cursor: "pointer", textDecoration: "underline" }}
+                    style={{ background: "none", border: "none", padding: 0, font: "inherit", fontSize: 14, color: "var(--me-green-text)", cursor: "pointer", textDecoration: "underline" }}
                     onClick={() => void pickCandidate(c.food_id)}
                   >
                     {c.name}
@@ -531,7 +531,7 @@ export function Composer({
         </div>
       )}
       {notice && (
-        <p style={{ marginTop: 12, fontSize: 14, color: "#c2512e" }} role="alert">{notice}</p>
+        <p style={{ marginTop: 12, fontSize: 14, color: "var(--me-roast)" }} role="alert">{notice}</p>
       )}
     </>
   )

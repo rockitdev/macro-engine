@@ -54,7 +54,7 @@ const STATUS_TONE: Record<string, "good" | "warn" | "neutral"> = {
 
 function Card({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`rounded-xl border border-[#e3e7e4] bg-white p-5 ${className}`}>
+    <section className={`rounded-xl border border-[var(--me-line)] bg-[var(--me-surface)] p-5 ${className}`}>
       <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
       <div className="mt-3">{children}</div>
     </section>
@@ -123,20 +123,20 @@ function TrendChart({ progress }: { progress: Progress }) {
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label="Bodyweight trend: weekly averages">
         {ticks.map((v) => (
           <g key={v}>
-            <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="#eef1ef" />
-            <text x={pad.l - 6} y={y(v) + 5} textAnchor="end" fontSize="14" fill="#5f6b65">
+            <line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="var(--me-mist)" />
+            <text x={pad.l - 6} y={y(v) + 5} textAnchor="end" fontSize="14" fill="var(--me-muted)">
               {Number.isInteger(step) ? v.toFixed(0) : v.toFixed(1)}
             </text>
           </g>
         ))}
         {daily.map((d) => (
-          <circle key={d.date} cx={x(d.date)} cy={y(toUnit(d.weight_kg, units) as number)} r="2.5" fill="#9aa8a0" opacity="0.6" />
+          <circle key={d.date} cx={x(d.date)} cy={y(toUnit(d.weight_kg, units) as number)} r="2.5" fill="var(--me-faint)" opacity="0.6" />
         ))}
-        <path d={line} fill="none" stroke="#1e6b45" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={line} fill="none" stroke="var(--me-green)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
         {weeks.map((w, i) => (
           <g key={w.start} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             <circle cx={x(w.start, true)} cy={y(toUnit(w.avg_kg, units) as number)} r="12" fill="transparent" />
-            <circle cx={x(w.start, true)} cy={y(toUnit(w.avg_kg, units) as number)} r={hover === i ? 5 : 3.5} fill="#1e6b45" stroke="#fff" strokeWidth="1.5" />
+            <circle cx={x(w.start, true)} cy={y(toUnit(w.avg_kg, units) as number)} r={hover === i ? 5 : 3.5} fill="var(--me-green)" stroke="var(--me-surface)" strokeWidth="1.5" />
           </g>
         ))}
       </svg>
@@ -255,7 +255,7 @@ function CheckInCard({ progress, onApplied }: { progress: Progress; onApplied: (
   }
 
   const tone = result ? STATUS_TONE[result.status] ?? "neutral" : "neutral"
-  const toneClass = tone === "good" ? "bg-[#e7f2ec] text-spinach" : tone === "warn" ? "bg-fat-bg text-fat-fg" : "bg-mist text-foreground"
+  const toneClass = tone === "good" ? "bg-[var(--me-green-soft)] text-spinach" : tone === "warn" ? "bg-fat-bg text-fat-fg" : "bg-mist text-foreground"
 
   return (
     <Card title="Weekly check-in">
@@ -264,7 +264,7 @@ function CheckInCard({ progress, onApplied }: { progress: Progress; onApplied: (
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {FLAGS.map(([key, label]) => (
-          <label key={key} className={`cursor-pointer rounded-full border px-3 py-1 text-sm ${flags[key] ? "border-spinach bg-[#e7f2ec]" : "border-[#e3e7e4]"}`}>
+          <label key={key} className={`cursor-pointer rounded-full border px-3 py-1 text-sm ${flags[key] ? "border-spinach bg-[var(--me-green-soft)]" : "border-[var(--me-line)]"}`}>
             <input type="checkbox" className="sr-only" checked={!!flags[key]} onChange={(e) => setFlags({ ...flags, [key]: e.target.checked })} />
             {label}
           </label>
@@ -479,7 +479,7 @@ function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () 
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-export function ProgressView({ date, onTargetsChanged }: { date: string; onTargetsChanged: () => void }) {
+export function ProgressView({ date, refreshKey = 0, onTargetsChanged }: { date: string; refreshKey?: number; onTargetsChanged: () => void }) {
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -490,7 +490,7 @@ export function ProgressView({ date, onTargetsChanged }: { date: string; onTarge
       .then((p) => { if (active) { setProgress(p); setError(null) } })
       .catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "Could not load progress") })
     return () => { active = false }
-  }, [date, tick])
+  }, [date, tick, refreshKey])
 
   const reload = () => setTick((t) => t + 1)
   const latest = useMemo(() => progress ? [...progress.weeks].reverse().find((w) => w.avg_kg != null) ?? null : null, [progress])

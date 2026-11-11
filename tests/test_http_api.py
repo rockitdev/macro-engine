@@ -244,6 +244,44 @@ class HttpApiTest(unittest.TestCase):
         _, day, _ = self.req("GET", "/api/day")
         self.assertEqual(day["entries"], [])
 
+    def test_duplicate_and_change_amount(self):
+        _, meal, _ = self.req("POST", "/api/meals", {
+            "items": [{"food_id": self.ids["Egg"], "qty": 2, "unit": "large"}],
+            "meal": "breakfast",
+        })
+        log_id = meal["logged"][0]["log_id"]
+
+        status, copy, _ = self.req("POST", f"/api/log/{log_id}/duplicate")
+        self.assertEqual(status, 200)
+        self.assertNotEqual(copy["log_id"], log_id)
+        self.assertEqual((copy["kcal"], copy["meal"]), (143.0, "breakfast"))
+
+        status, entry, _ = self.req("POST", f"/api/log/{copy['log_id']}", {"scale": 1.5})
+        self.assertEqual(status, 200)
+        self.assertEqual(entry["qty_desc"], "3 x 1 large")
+        self.assertEqual(entry["grams"], 150)
+        self.assertEqual(entry["kcal"], 214.5)
+
+        status, entry, _ = self.req("POST", f"/api/log/{log_id}", {"grams": 50, "meal": "lunch"})
+        self.assertEqual(status, 200)
+        self.assertEqual((entry["kcal"], entry["meal"]), (71.5, "lunch"))
+
+        _, day, _ = self.req("GET", "/api/day")
+        self.assertEqual(len(day["entries"]), 2)
+        self.assertEqual(day["eaten"]["kcal"], 286.0)
+
+        # A bad meal must not half-apply the amount change.
+        status, _, _ = self.req("POST", f"/api/log/{log_id}", {"grams": 500, "meal": "brunch"})
+        self.assertEqual(status, 400)
+        for body in ({"scale": 0}, {"grams": "lots"}, {"grams": 10, "scale": 2}, {"note": "x"}):
+            status, _, _ = self.req("POST", f"/api/log/{log_id}", body)
+            self.assertEqual(status, 400)
+        _, day, _ = self.req("GET", "/api/day")
+        self.assertEqual(day["eaten"]["kcal"], 286.0)
+
+        self.assertEqual(self.req("POST", "/api/log/999/duplicate")[0], 404)
+        self.assertEqual(self.req("POST", "/api/log/999", {"scale": 2})[0], 404)
+
     def test_unknown_unit_is_a_problem_not_an_error(self):
         status, meal, _ = self.req("POST", "/api/meals", {
             "items": [{"food_id": self.ids["Bananas"], "qty": 1, "unit": "bucket"}],

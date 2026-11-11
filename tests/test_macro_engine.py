@@ -129,6 +129,56 @@ class MacroEngineTest(unittest.TestCase):
         self.assertTrue(tracker.delete_log_entry(self.con, log_id))
         self.assertEqual(tracker.day_totals(self.con, "2026-07-08")["kcal"], 0)
 
+    def test_duplicate_log_entry(self):
+        out = tracker.log_meal(self.con, [{"query": "banana"}], date="2026-07-08",
+                               meal="lunch")
+        first = tracker.day_log(self.con, "2026-07-08")[0]
+        copy = tracker.duplicate_log_entry(self.con, out["logged"][0]["log_id"])
+        self.assertNotEqual(copy["log_id"], first["log_id"])
+        for key in ("food_id", "qty_desc", "grams", "kcal", "protein_g", "meal", "name"):
+            self.assertEqual(copy[key], first[key])
+        self.assertEqual(len(tracker.day_log(self.con, "2026-07-08")), 2)
+        self.assertEqual(tracker.day_totals(self.con, "2026-07-08")["kcal"],
+                         round(first["kcal"] * 2, 1))
+        self.assertIsNone(tracker.duplicate_log_entry(self.con, 9999))
+
+    def test_set_log_amount(self):
+        out = tracker.log_meal(self.con, [
+            {"query": "banana", "qty": 2},
+            {"query": "banana", "grams": 100},
+            {"query": "banana", "qty": 2, "unit": "oz"},
+            {"name": "bar snack", "macros": {"kcal": 200, "protein_g": 10}},
+        ], date="2026-07-08")
+        count, grams, mass, est = [e["log_id"] for e in out["logged"]]
+        before = {e["log_id"]: e for e in tracker.day_log(self.con, "2026-07-08")}
+
+        # Portion count: 2 -> 3 of the same portion.
+        e = tracker.set_log_amount(self.con, count, scale=1.5)
+        self.assertTrue(e["qty_desc"].startswith("3 x "))
+        self.assertAlmostEqual(e["grams"], before[count]["grams"] * 1.5)
+        self.assertAlmostEqual(e["kcal"], before[count]["kcal"] * 1.5, delta=0.1)
+
+        # Plain grams.
+        e = tracker.set_log_amount(self.con, grams, grams=250)
+        self.assertEqual(e["qty_desc"], "250 g")
+        self.assertEqual(e["grams"], 250)
+        self.assertAlmostEqual(e["kcal"], before[grams]["kcal"] * 2.5, delta=0.1)
+
+        # Mass unit keeps its unit.
+        e = tracker.set_log_amount(self.con, mass, scale=0.5)
+        self.assertEqual(e["qty_desc"], "1 ounce (28.35 g)")
+
+        # Estimates scale but keep their name, and have no grams to set.
+        e = tracker.set_log_amount(self.con, est, scale=2)
+        self.assertEqual((e["name"], e["kcal"], e["protein_g"]), ("bar snack", 400, 20))
+        with self.assertRaises(ValueError):
+            tracker.set_log_amount(self.con, est, grams=50)
+
+        for bad in ({}, {"grams": 1, "scale": 1}, {"scale": 0}, {"grams": -5}):
+            with self.assertRaises(ValueError):
+                tracker.set_log_amount(self.con, count, **bad)
+        self.assertIsNone(tracker.set_log_amount(self.con, 9999, scale=2))
+
     def test_add_food_store_searchable(self):
         out = tracker.add_food(
             self.con, "Breaded Chicken Burgers", kcal=210, protein_g=14,

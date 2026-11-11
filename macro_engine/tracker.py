@@ -6,6 +6,7 @@ log row carries denormalized macros so history survives food-table changes.
 
 import datetime as _dt
 import math
+import re
 import sqlite3
 
 from . import resolve
@@ -555,17 +556,102 @@ def month_summary(con: sqlite3.Connection, date: str | None = None, *,
     }
 
 
+_ENTRY_SQL = """SELECT l.id AS log_id, l.ts, l.food_id, l.qty_desc, l.grams, l.kcal,
+                       l.protein_g, l.carb_g, l.fat_g, l.fiber_g, l.estimated, l.meal,
+                       COALESCE(f.name, l.qty_desc) AS name
+                FROM log l LEFT JOIN foods f ON f.id = l.food_id"""
+
+
 def day_log(con: sqlite3.Connection, date: str | None = None) -> list[dict]:
     date = date or _today()
-    rows = con.execute(
-        """SELECT l.id AS log_id, l.ts, l.food_id, l.qty_desc, l.grams, l.kcal,
-                  l.protein_g, l.carb_g, l.fat_g, l.fiber_g, l.estimated, l.meal,
-                  COALESCE(f.name, l.qty_desc) AS name
-           FROM log l LEFT JOIN foods f ON f.id = l.food_id
-           WHERE l.date = ? ORDER BY l.id""",
-        (date,),
-    ).fetchall()
+    rows = con.execute(_ENTRY_SQL + " WHERE l.date = ? ORDER BY l.id", (date,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def _entry(con: sqlite3.Connection, log_id: int) -> dict | None:
+    row = con.execute(_ENTRY_SQL + " WHERE l.id = ?", (int(log_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def duplicate_log_entry(con: sqlite3.Connection, log_id: int) -> dict | None:
+    """Log the same thing again: copy one row (same date, meal, amount, and its
+    own denormalized macros) as a new entry. Returns the new entry in day_log
+    shape, or None when the id is missing."""
+    cur = con.execute(
+        """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g, carb_g,
+                            fat_g, fiber_g, raw_text, estimated, meal)
+           SELECT date, food_id, qty_desc, grams, kcal, protein_g, carb_g,
+                  fat_g, fiber_g, raw_text, estimated, meal
+           FROM log WHERE id = ?""",
+        (int(log_id),),
+    )
+    con.commit()
+    if cur.rowcount == 0:
+        return None
+    return _entry(con, cur.lastrowid)
+
+
+_NUM = r"(\d+(?:\.\d+)?)"
+_DESC_COUNT = re.compile(rf"^{_NUM} x (.+)$")            # "2 x 1 large"
+_DESC_GRAMS = re.compile(rf"^{_NUM} g( \(no portion data\))?$")  # "150 g"
+_DESC_MASS = re.compile(rf"^{_NUM} (\S+) \({_NUM} g\)$")  # "2 ounce (56.699 g)"
+
+
+def _fmt_qty(n: float) -> str:
+    return f"{round(n, 2):g}"
+
+
+def _scaled_desc(desc: str | None, factor: float, grams: float | None) -> str | None:
+    """Rewrite a qty_desc written by _resolve_grams for a scaled amount.
+    Anything unrecognized is left alone."""
+    if not desc:
+        return desc
+    m = _DESC_COUNT.match(desc)
+    if m:
+        return f"{_fmt_qty(float(m[1]) * factor)} x {m[2]}"
+    if grams is not None:
+        m = _DESC_GRAMS.match(desc)
+        if m:
+            return f"{_fmt_qty(grams)} g{m[2] or ''}"
+        m = _DESC_MASS.match(desc)
+        if m:
+            return f"{_fmt_qty(float(m[1]) * factor)} {m[2]} ({_fmt_qty(grams)} g)"
+    return desc
+
+
+def set_log_amount(con: sqlite3.Connection, log_id: int, *, grams=None,
+                   scale=None) -> dict | None:
+    """Change how much of one log row was eaten. Give exactly one of:
+      - grams: the new weight (only for rows that have a gram weight)
+      - scale: a multiplier on the current amount (1.5 = half again as much)
+    The row's own stored macros are scaled, so the nutrition the entry was
+    logged with is kept even if the food has changed since. Returns the updated
+    entry in day_log shape, or None when the id is missing."""
+    if (grams is None) == (scale is None):
+        raise ValueError("provide exactly one of grams or scale")
+    row = con.execute("SELECT * FROM log WHERE id = ?", (int(log_id),)).fetchone()
+    if row is None:
+        return None
+    if grams is not None:
+        new_grams = _num(grams, "grams", positive=True)
+        if not row["grams"] or row["grams"] <= 0:
+            raise ValueError("this entry has no gram weight; change it with scale")
+        factor = new_grams / row["grams"]
+    else:
+        factor = _num(scale, "scale", positive=True)
+        new_grams = row["grams"] * factor if row["grams"] else row["grams"]
+    # Estimates store their name in qty_desc; only food rows describe a quantity.
+    desc = row["qty_desc"]
+    if row["food_id"] is not None:
+        desc = _scaled_desc(desc, factor, new_grams)
+    vals = [round(row[k] * factor, 1) for k in MACROS]
+    con.execute(
+        """UPDATE log SET qty_desc = ?, grams = ?, kcal = ?, protein_g = ?,
+                          carb_g = ?, fat_g = ?, fiber_g = ? WHERE id = ?""",
+        (desc, new_grams, *vals, int(log_id)),
+    )
+    con.commit()
+    return _entry(con, log_id)
 
 
 def set_log_meal(con: sqlite3.Connection, log_id: int, meal: str | None) -> dict | None:

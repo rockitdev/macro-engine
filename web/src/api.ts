@@ -1,4 +1,4 @@
-import type { ActivitySummary, BarcodeFood, CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
+import type { ActivitySummary, BarcodeFood, CheckIn, Day, Entry, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
 
 export class ApiError extends Error {}
 
@@ -97,6 +97,14 @@ export function setLogMeal(id: number, meal: string | null) {
     method: "POST",
     body: JSON.stringify({ meal }),
   })
+}
+
+export function setLogAmount(id: number, change: { grams: number } | { scale: number }) {
+  return request<Entry>(`/api/log/${id}`, { method: "POST", body: JSON.stringify(change) })
+}
+
+export function duplicateLog(id: number) {
+  return request<Entry>(`/api/log/${id}/duplicate`, { method: "POST" })
 }
 
 export function setTargets(body: {

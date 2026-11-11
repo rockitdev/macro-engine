@@ -264,13 +264,34 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
     if method == "POST" and len(parts) == 3 and parts[:2] == ["api", "log"]:
         log_id = _as_int(parts[2], "log_id")
         body = _read_body(handler)
-        if "meal" not in body:
-            raise ValueError("missing meal")
+        amount = {k: body[k] for k in ("grams", "scale") if body.get(k) is not None}
+        if "meal" not in body and not amount:
+            raise ValueError("missing meal, grams, or scale")
         with _connect() as con:
-            updated = tracker.set_log_meal(con, log_id, body["meal"])
-        if not updated:
-            raise ApiError(404, f"no log entry {log_id}")
+            updated = None
+            if amount:
+                # Validate the meal first so a bad one can't leave a half-applied edit.
+                if "meal" in body:
+                    tracker._meal(body["meal"])
+                updated = tracker.set_log_amount(con, log_id, **amount)
+                if not updated:
+                    raise ApiError(404, f"no log entry {log_id}")
+            if "meal" in body:
+                moved = tracker.set_log_meal(con, log_id, body["meal"])
+                if not moved:
+                    raise ApiError(404, f"no log entry {log_id}")
+                updated = {**updated, "meal": moved["meal"]} if updated else moved
         _send_json(handler, 200, updated)
+        return
+
+    if (method == "POST" and len(parts) == 4 and parts[:2] == ["api", "log"]
+            and parts[3] == "duplicate"):
+        log_id = _as_int(parts[2], "log_id")
+        with _connect() as con:
+            entry = tracker.duplicate_log_entry(con, log_id)
+        if not entry:
+            raise ApiError(404, f"no log entry {log_id}")
+        _send_json(handler, 200, entry)
         return
 
     if method == "DELETE" and len(parts) == 3 and parts[:2] == ["api", "log"]:

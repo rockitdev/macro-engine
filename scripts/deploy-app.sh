@@ -80,8 +80,8 @@ main() {
 
   local i
   for i in $(seq 1 30); do
-    if curl -fsS -o /dev/null http://127.0.0.1:4332/api/day \
-      && curl -fsS -o /dev/null http://127.0.0.1:4332/; then
+    if curl -fs -o /dev/null http://127.0.0.1:4332/api/day \
+      && curl -fs -o /dev/null http://127.0.0.1:4332/; then
       echo "$want" > .git/deployed-sha
       echo "deploy: ${want:0:7} is live on :4332"
       return 0

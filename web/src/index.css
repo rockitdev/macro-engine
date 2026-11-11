@@ -424,6 +424,17 @@
     gap: 16px !important;
   }
 
+  /* Week table: narrower columns, eaten-only macro labels. */
+  .week-row {
+    grid-template-columns: 96px minmax(0, 1fr) 48px !important;
+    gap: 10px !important;
+    padding: 12px 16px !important;
+  }
+  .wk-target,
+  .wk-today-pill {
+    display: none; /* today's row is already tinted */
+  }
+
   /* Week/month summary cards: one row each (label left, figure right). */
   .stat-grid {
     grid-template-columns: 1fr !important;

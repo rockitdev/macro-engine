@@ -248,6 +248,28 @@ Other measurements and notes are preserved. Corrected values with an identical
 timestamp are not automatically reapplied; edit that day's measurement manually.
 This feeds the existing weekly check-in; it does not apply target changes.
 
+## Web app on iPhone (Home Screen install)
+
+The web UI is an installable PWA: full-screen, bottom tab bar, dark mode, and it
+refreshes itself whenever it returns to the foreground.
+
+Two endpoints come up with `docker compose -f docker-compose.dev.yml up -d`:
+
+| Endpoint | Serves | Use for |
+|---|---|---|
+| `:4325` (`web`) | Vite dev server, hot reload | Development |
+| `:4332` (`api`) | Built `web/dist` + the API | The installed app |
+
+Install from the built endpoint (Safari → Share → Add to Home Screen); the icon
+is tied to the host it was installed from. After changing the UI, rebuild what
+the installed app serves:
+
+```bash
+docker compose -f docker-compose.dev.yml exec web npm run build
+```
+
+No service worker yet, so the app needs to reach the server to load.
+
 ## Architecture
 
 - `macro_engine/db.py` — SQLite schema (foods, per-100g nutrients, portions,

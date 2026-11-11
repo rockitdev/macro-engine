@@ -10,6 +10,12 @@ services:
       MACRO_ENGINE_DB: /root/.local/share/macro-engine/macros.db
       MACRO_ENGINE_HEALTH_TOKEN: ${MACRO_ENGINE_HEALTH_TOKEN:-}
     command: python -m macro_engine.http_api --host 0.0.0.0 --port 8787
+    ports:
+      # Built app (web/dist) + API — what the installed Home Screen app uses.
+      # Rebuild after UI changes: docker compose -f docker-compose.dev.yml exec web npm run build
+      # Bind loopback + LAN only — never 0.0.0.0 (shadows tailscale TLS listener)
+      - "127.0.0.1:4332:8787"
+      - "192.168.1.60:4332:8787"
     restart: unless-stopped
 
   # Vite/React dev server — hot-reload, proxies /api → api:8787

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ApiError, deleteLog, getDay, getFood, getMonth, getWeek, setLogMeal, setWeekStart } from "@/api"
 import { DayView } from "@/components/day-view"
@@ -84,6 +84,10 @@ export default function App() {
   const [meal, setMeal] = useState<Meal>(defaultMeal)
   const [fitMealOpen, setFitMealOpen] = useState(false)
   const consumeSeed = useCallback(() => setSeed(null), [])
+  // Bumped whenever the app returns to the foreground; views that fetch their own data key off it.
+  const [resumeCount, setResumeCount] = useState(0)
+  const viewRef = useRef({ date, mode })
+  useEffect(() => { viewRef.current = { date, mode } }, [date, mode])
 
   // Keep the range in the URL hash so views are linkable (#progress).
   useEffect(() => {
@@ -130,6 +134,37 @@ export default function App() {
       })
     return () => { active = false }
   }, [date, mode])
+
+  // An installed app has no reload button and iOS keeps it suspended, so refresh
+  // whenever it comes back to the foreground (food logged through chat shows up),
+  // and follow the calendar when the day has rolled over since it was last open.
+  useEffect(() => {
+    let lastDay = isoToday()
+    let lastRefresh = Date.now()
+    function onResume() {
+      if (document.visibilityState !== "visible") return
+      const nowDay = isoToday()
+      const rolled = nowDay !== lastDay
+      if (!rolled && Date.now() - lastRefresh < 5000) return
+      lastRefresh = Date.now()
+      setResumeCount((n) => n + 1)
+      if (rolled) {
+        const wasOnToday = viewRef.current.date === lastDay
+        lastDay = nowDay
+        if (wasOnToday) {
+          setDate(nowDay) // the [date, mode] effect loads it
+          return
+        }
+      }
+      void load(viewRef.current.date, viewRef.current.mode)
+    }
+    document.addEventListener("visibilitychange", onResume)
+    window.addEventListener("pageshow", onResume)
+    return () => {
+      document.removeEventListener("visibilitychange", onResume)
+      window.removeEventListener("pageshow", onResume)
+    }
+  }, [load])
 
   const ready =
     mode === "day" ? day?.date === date
@@ -314,7 +349,7 @@ export default function App() {
                 Today
               </button>
             )}
-            {weekPaceBadge && (
+            {weekPaceBadge && (mode === "day" || mode === "week") && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--me-green-text)", background: "var(--me-green-soft)", padding: "4px 10px", borderRadius: 999 }}>
                 <span style={{ width: 6, height: 6, borderRadius: 99, background: "var(--me-green)" }} />
                 {weekPaceBadge}
@@ -368,7 +403,7 @@ export default function App() {
 
         {/* ── Progress (coaching) view ── */}
         {mode === "progress" && (
-          <ProgressView date={date} onTargetsChanged={() => void load(date, mode)} />
+          <ProgressView date={date} refreshKey={resumeCount} onTargetsChanged={() => void load(date, mode)} />
         )}
 
         </div>

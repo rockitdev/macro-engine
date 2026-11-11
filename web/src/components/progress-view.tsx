@@ -479,7 +479,7 @@ function SetupCard({ progress, onApplied }: { progress: Progress; onApplied: () 
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
-export function ProgressView({ date, onTargetsChanged }: { date: string; onTargetsChanged: () => void }) {
+export function ProgressView({ date, refreshKey = 0, onTargetsChanged }: { date: string; refreshKey?: number; onTargetsChanged: () => void }) {
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -490,7 +490,7 @@ export function ProgressView({ date, onTargetsChanged }: { date: string; onTarge
       .then((p) => { if (active) { setProgress(p); setError(null) } })
       .catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "Could not load progress") })
     return () => { active = false }
-  }, [date, tick])
+  }, [date, tick, refreshKey])
 
   const reload = () => setTick((t) => t + 1)
   const latest = useMemo(() => progress ? [...progress.weeks].reverse().find((w) => w.avg_kg != null) ?? null : null, [progress])

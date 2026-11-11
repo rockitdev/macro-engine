@@ -34,7 +34,7 @@ function MacroBars({ day, today }: { day: WeekDay; today: string }) {
               {over
                 ? `${label} ${formatGrams(Math.abs(under!))} g over`
                 : target != null
-                  ? `${label} ${formatGrams(eaten)} / ${formatGrams(target)}`
+                  ? <>{label} {formatGrams(eaten)}<span className="wk-target"> / {formatGrams(target)}</span></>
                   : `${label} ${formatGrams(eaten)}`}
             </div>
             <div style={{ marginTop: 4, height: 6, borderRadius: 99, background: "var(--me-mist)", overflow: "hidden" }}>
@@ -137,7 +137,7 @@ export function WeekView({
       {/* Day table */}
       <section className="me-card" style={{ marginTop: 20, overflow: "hidden" }}>
         {/* Column headers */}
-        <div style={{
+        <div className="week-row" style={{
           padding: "14px 20px",
           display: "grid",
           gridTemplateColumns: "120px minmax(0,1fr) 90px",
@@ -160,6 +160,7 @@ export function WeekView({
               type="button"
               onClick={() => onSelect(day.date)}
               aria-current={isToday ? "date" : undefined}
+              className="week-row"
               style={{
                 all: "unset", boxSizing: "border-box", width: "100%",
                 display: "grid", gridTemplateColumns: "120px minmax(0,1fr) 90px",
@@ -179,7 +180,7 @@ export function WeekView({
                 }}>
                   {weekdayName(day.date)}
                   {isToday && (
-                    <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em", background: "var(--me-green)", color: "var(--me-on-green)", padding: "1px 6px", borderRadius: 99 }}>
+                    <span className="wk-today-pill" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em", background: "var(--me-green)", color: "var(--me-on-green)", padding: "1px 6px", borderRadius: 99 }}>
                       Today
                     </span>
                   )}

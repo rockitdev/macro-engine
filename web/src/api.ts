@@ -1,4 +1,4 @@
-import type { CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week } from "./types"
+import type { ActivitySummary, CheckIn, Day, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
 
 export class ApiError extends Error {}
 
@@ -155,7 +155,14 @@ export function getProgress(date: string) {
   return request<Progress>(`/api/progress?date=${encodeURIComponent(date)}`)
 }
 
-export function saveProfile(body: Partial<Profile> & { age?: number }) {
+export function saveProfile(body: Omit<Partial<Profile>, "daily_activity" | "strength_days_per_week" | "strength_minutes_per_session" | "goal_loss_kg"> & {
+  age?: number
+  height_in?: number
+  daily_activity?: Profile["daily_activity"] | ""
+  strength_days_per_week?: number | ""
+  strength_minutes_per_session?: number | ""
+  goal_loss_kg?: number | ""
+}) {
   return request<Profile>("/api/profile", { method: "POST", body: JSON.stringify(body) })
 }
 
@@ -186,4 +193,33 @@ export function checkIn(body: {
   apply?: boolean
 }) {
   return request<CheckIn>("/api/checkin", { method: "POST", body: JSON.stringify(body) })
+}
+
+// ── Activity ────────────────────────────────────────────────────────────────
+
+export function setActivitySettings(body: { source?: string; timezone?: string }) {
+  return request<{ timezone: string; source: ActivitySummary["source"] }>("/api/activity/settings", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export type ManualWorkout = {
+  date: string
+  type: string
+  duration_minutes: number
+  start_time?: string | null
+  note?: string | null
+}
+
+export function addWorkout(body: ManualWorkout) {
+  return request<Workout>("/api/workouts", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function updateWorkout(id: number, body: Partial<ManualWorkout>) {
+  return request<Workout>(`/api/workouts/${id}`, { method: "POST", body: JSON.stringify(body) })
+}
+
+export function deleteWorkout(id: number) {
+  return request<{ deleted: boolean }>(`/api/workouts/${id}`, { method: "DELETE" })
 }

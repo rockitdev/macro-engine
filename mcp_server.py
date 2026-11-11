@@ -257,13 +257,24 @@ def fit_meal(restaurant: str, remaining: dict | None = None,
 
 @mcp.tool()
 def set_profile(sex: str | None = None, age: float | None = None,
-                birth_year: int | None = None, height_cm: float | None = None,
+                birth_year: int | None = None, birth_date: str | None = None, height_cm: float | None = None,
                 height_in: float | None = None, activity: str | None = None,
                 resistance_training: bool | None = None,
+                daily_activity: str | None = None,
+                strength_days_per_week: int | None = None,
+                strength_minutes_per_session: int | None = None,
+                goal: str | None = None, goal_loss_kg: float | None = None,
+                goal_loss_lb: float | None = None,
                 carb_share: float | None = None,
                 adjust_with_activity: bool | None = None,
                 units: str | None = None) -> dict:
     """Store the body facts the target math needs. Partial updates merge.
+    birth_date: YYYY-MM-DD; preferred over approximate age/birth_year.
+    daily_activity: seated | on_feet | physical, excluding workouts.
+    Strength schedule: days/week (0-7), minutes/session (0-480).
+    goal: cut | maintain | reverse. goal_loss_kg OR goal_loss_lb stores an
+    approximate long-term loss goal, not a rate or an automatic calorie change.
+    Overall activity below includes training; schedule fields don't add calories.
     activity: sedentary (desk, no exercise) | light (desk + some exercise, or
     on-feet job) | moderate (desk + hard training — most lifters) | very (hard
     training + on-feet job) | extra (hard training + physical labour).
@@ -273,9 +284,12 @@ def set_profile(sex: str | None = None, age: float | None = None,
     units: kg|lb for how weights are shown."""
     con = _con()
     try:
-        return coach.set_profile(con, sex=sex, age=age, birth_year=birth_year,
+        return coach.set_profile(con, sex=sex, age=age, birth_year=birth_year, birth_date=birth_date,
                                  height_cm=height_cm, height_in=height_in,
                                  activity=activity, resistance_training=resistance_training,
+                                 daily_activity=daily_activity, strength_days_per_week=strength_days_per_week,
+                                 strength_minutes_per_session=strength_minutes_per_session,
+                                 goal=goal, goal_loss_kg=goal_loss_kg, goal_loss_lb=goal_loss_lb,
                                  carb_share=carb_share, adjust_with_activity=adjust_with_activity,
                                  units=units)
     finally:
@@ -309,7 +323,14 @@ def progress(date: str | None = None, weeks: int = 12) -> dict:
     measured vs predicted maintenance (a big negative gap = metabolic
     adaptation), current phase and week number, 14-day adherence (logging
     coverage, days within 5% of kcal, protein hits, weekend drift), and the
-    last check-in. Use for 'how am I doing' questions."""
+    last check-in. Use for 'how am I doing' questions.
+
+    `activity` holds Apple Watch context: Watch-recorded steps (one selected
+    source; today is 'so far' and excluded from averages), resting heart rate,
+    workouts (manual entries only: Shortcuts can't read workouts), weekly
+    counts with denominators, freshness, and sync/catch-up state. Unknown days
+    are not zero. Describe it ("steps recorded on 5 of 7 days"); never use it
+    to change targets or draw medical/recovery conclusions."""
     con = _con()
     try:
         return coach.progress(con, date, weeks)
@@ -371,7 +392,11 @@ def check_in(date: str | None = None, period: bool = False, high_stress: bool = 
     reverse diets add 3-10%/week unless weight rose too fast.
 
     Run with apply=false, explain, and re-run with apply=true only once the
-    user agrees. Each call is recorded in check-in history."""
+    user agrees. Each call is recorded in check-in history.
+
+    The result includes `activity`: descriptive Watch context (steps coverage,
+    resting HR, recorded workouts vs the planned strength routine). It does
+    not affect the recommendation; an unrecorded workout is not a skipped one."""
     con = _con()
     try:
         flags = {"period": period, "high_stress": high_stress, "poor_sleep": poor_sleep,

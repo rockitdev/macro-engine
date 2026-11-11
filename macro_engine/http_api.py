@@ -10,6 +10,7 @@ serves the built app.
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import traceback
@@ -17,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import coach, db, fit_meal as _fit_meal_mod, resolve, tracker
+from . import activity, coach, db, fit_meal as _fit_meal_mod, health_import, resolve, tracker
 from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -92,13 +93,24 @@ def _as_int(value, field: str) -> int:
         raise ValueError(f"{field} must be an integer")
 
 
-def _read_body(handler: BaseHTTPRequestHandler) -> dict:
+def _read_body(handler: BaseHTTPRequestHandler, max_body: int = MAX_BODY) -> dict:
     try:
         length = int(handler.headers.get("Content-Length") or 0)
     except ValueError:
         raise ValueError("Content-Length must be an integer")
-    if length < 0 or length > MAX_BODY:
+    if length < 0:
         raise ValueError("body too large")
+    if length > max_body:
+        # Drain a moderately oversized body so the client reads this error
+        # instead of a broken pipe; anything larger is cut off.
+        if length <= 4 * max_body:
+            remaining = length
+            while remaining > 0:
+                chunk = handler.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        raise ValueError(f"body too large (limit {max_body} bytes); nothing was saved")
     raw = handler.rfile.read(length) if length else b""
     if not raw:
         raise ValueError("JSON body required")
@@ -117,6 +129,15 @@ def _missing(data: dict, *keys: str) -> None:
         raise ValueError("missing " + ", ".join(missing))
 
 
+def _require_health_token(handler: BaseHTTPRequestHandler) -> None:
+    token = os.environ.get("MACRO_ENGINE_HEALTH_TOKEN", "")
+    if not token:
+        raise ApiError(503, "Apple Health import is not configured")
+    supplied = handler.headers.get("Authorization", "")
+    if not hmac.compare_digest(supplied.encode(), ("Bearer " + token).encode()):
+        raise ApiError(401, "invalid sync token")
+
+
 def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
     parsed = urlparse(handler.path)
     path = parsed.path.rstrip("/") or "/"
@@ -129,6 +150,59 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
 
     if method == "GET" and path == "/api/health":
         _send_json(handler, 200, {"ok": True})
+        return
+
+    if method == "POST" and path == "/api/import/apple-health":
+        _require_health_token(handler)
+        body = _read_body(handler)
+        with _connect() as con:
+            result = health_import.import_metrics(con, body)
+        _send_json(handler, 200, result)
+        return
+
+    if method == "POST" and path == "/api/import/apple-health/activity":
+        _require_health_token(handler)
+        body = _read_body(handler, activity.MAX_BODY)
+        with _connect() as con:
+            try:
+                result = activity.import_activity(con, body)
+            except activity.ConflictError as exc:
+                raise ApiError(409, str(exc))
+        _send_json(handler, 200, result)
+        return
+
+    if method == "GET" and path == "/api/import/apple-health/activity/status":
+        # Authenticated so the shortcut can check its header before uploading.
+        _require_health_token(handler)
+        with _connect() as con:
+            _send_json(handler, 200, activity.sync_status(con))
+        return
+
+    if method == "POST" and path == "/api/activity/settings":
+        body = _read_body(handler)
+        with _connect() as con:
+            _send_json(handler, 200, activity.update_settings(con, body))
+        return
+
+    if method == "POST" and path == "/api/workouts":
+        body = _read_body(handler)
+        with _connect() as con:
+            _send_json(handler, 200, activity.add_manual_workout(con, body))
+        return
+
+    if method in ("POST", "DELETE") and len(parts) == 3 and parts[:2] == ["api", "workouts"]:
+        workout_id = _as_int(parts[2], "workout_id")
+        with _connect() as con:
+            if method == "DELETE":
+                if not activity.delete_manual_workout(con, workout_id):
+                    raise ApiError(404, f"no workout {workout_id}")
+                _send_json(handler, 200, {"deleted": True, "workout_id": workout_id})
+                return
+            body = _read_body(handler)
+            updated = activity.update_manual_workout(con, workout_id, body)
+        if updated is None:
+            raise ApiError(404, f"no workout {workout_id}")
+        _send_json(handler, 200, updated)
         return
 
     if method == "GET" and path == "/api/day":
@@ -308,7 +382,9 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
 
     if method == "GET" and path == "/api/progress":
         with _connect() as con:
-            _send_json(handler, 200, coach.progress(con, _query_date(qs)))
+            result = coach.progress(con, _query_date(qs))
+            result["apple_health_sync"] = health_import.status(con)
+            _send_json(handler, 200, result)
         return
 
     if method == "POST" and path == "/api/plan":

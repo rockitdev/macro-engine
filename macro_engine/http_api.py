@@ -287,6 +287,13 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         _send_json(handler, 200, result)
         return
 
+    # The latest day with entries before ?before= (default today): the copy default.
+    if method == "GET" and path == "/api/log/last-day":
+        before = (qs.get("before") or [None])[0]
+        with _connect() as con:
+            _send_json(handler, 200, {"date": tracker.last_logged_day(con, before or None)})
+        return
+
     # Copy another day's entries (optionally only some meals) onto a day.
     if method == "POST" and path == "/api/log/copy":
         body = _read_body(handler)

@@ -18,6 +18,8 @@ export type Food = {
   store: string | null
   source: string
   verified: number
+  /** 1 when the food is in My Kitchen. */
+  in_kitchen?: number
   kcal: number | null
   protein_g: number | null
   carb_g: number | null
@@ -51,6 +53,7 @@ export type Entry = {
   estimated: boolean
   meal: string | null
   name: string
+  in_kitchen: number
 }
 
 export type Day = {
@@ -448,3 +451,46 @@ export type Plan = {
   warnings: string[]
   notes: string[]
 }
+
+// ── Quick logging ───────────────────────────────────────────────────────────
+
+/** The amount offered for a one-tap log. `item` merges into a logMeal item. */
+export type Usual = {
+  item: { qty: number; unit: string } | { grams: number }
+  desc: string
+  grams: number
+  kcal: number
+  protein_g: number
+  carb_g: number
+  fat_g: number
+  fiber_g: number
+}
+
+export type Pick = Food & {
+  usual: Usual
+  times: number
+  last_date: string | null
+}
+
+export type RecipeItem = Macros & {
+  id: number
+  food_id: number | null
+  name: string
+  qty_desc: string | null
+  grams: number | null
+}
+
+export type Recipe = {
+  food_id: number
+  name: string
+  servings: number
+  serving_grams: number | null
+  weighed: boolean
+  in_kitchen: number
+  per_serving: Macros
+  total: Macros
+  items: RecipeItem[]
+  food: Food
+}
+
+export type RecipeResult = ({ saved: true } & Recipe) | { saved: false; problems: Problem[] }

@@ -1,19 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { ApiError, deleteLog, duplicateLog, getDay, getFood, getMonth, getWeek, setLogAmount, setLogMeal, setWeekStart } from "@/api"
+import { ApiError, deleteLogs, duplicateLog, duplicateLogs, getDay, getFood, getMonth, getRecipe, getWeek, moveLogs, restoreLogs, setKitchen, setLogAmount, setLogMeal, setWeekStart } from "@/api"
 import type { AmountChange } from "@/components/amount-sheet"
+import { CopyDaySheet } from "@/components/copy-day-sheet"
 import { DayView } from "@/components/day-view"
 import { FitMealDialog } from "@/components/fit-meal-dialog"
 import { FoodDialog } from "@/components/food-dialog"
 import { MonthView } from "@/components/month-view"
 import { ProgressView } from "@/components/progress-view"
+import { RecipeSheet, type RecipeDraft } from "@/components/recipe-sheet"
 import { TargetsDialog } from "@/components/targets-dialog"
+import { BottomSheet, BottomSheetContent, BottomSheetTitle } from "@/components/ui/bottom-sheet"
 import { WeekView } from "@/components/week-view"
 import { formatLong, formatMonth, formatSpan, isoToday, shiftDate, shiftMonth } from "@/lib/format"
-import { defaultMeal, type Meal } from "@/lib/meals"
-import type { Day, Food, Month, Week } from "@/types"
+import { defaultMeal, mealLabel, type Meal } from "@/lib/meals"
+import type { Day, Entry, Food, Month, Recipe, Week } from "@/types"
 
 type Range = "day" | "week" | "month" | "progress"
+
+/** A short confirmation at the bottom of the screen, optionally undoable. */
+type Toast = { id: number; text: string; undo?: () => Promise<void> }
+
+const TOAST_MS = 6000
+
+function countOf(n: number) {
+  return `${n} ${n === 1 ? "item" : "items"}`
+}
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 function LeafIcon() {
@@ -84,6 +96,11 @@ export default function App() {
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [meal, setMeal] = useState<Meal>(defaultMeal)
   const [fitMealOpen, setFitMealOpen] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [recipeDraft, setRecipeDraft] = useState<RecipeDraft | null>(null)
+  const [listKey, setListKey] = useState(0)
+  const [toast, setToast] = useState<Toast | null>(null)
+  const toastTimer = useRef<number | undefined>(undefined)
   const consumeSeed = useCallback(() => setSeed(null), [])
   // Bumped whenever the app returns to the foreground; views that fetch their own data key off it.
   const [resumeCount, setResumeCount] = useState(0)
@@ -256,15 +273,108 @@ export default function App() {
     }
   }
 
+  function say(text: string, undo?: () => Promise<void>) {
+    window.clearTimeout(toastTimer.current)
+    setToast({ id: Date.now(), text, undo })
+    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS)
+  }
+
+  function dismissToast() {
+    window.clearTimeout(toastTimer.current)
+    setToast(null)
+  }
+
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
+  /** Remove entries, with an Undo that puts them back exactly as they were. */
+  async function removeEntries(ids: number[], label: string) {
+    try {
+      const { deleted } = await deleteLogs(ids)
+      await load(date, mode)
+      say(`Removed ${label}`, async () => {
+        await restoreLogs(deleted)
+        await load(viewRef.current.date, viewRef.current.mode)
+      })
+      return true
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove that")
+      return false
+    }
+  }
+
   async function remove(id: number) {
+    const entry = day?.entries.find((e) => e.log_id === id)
     setPendingId(id)
     try {
-      await deleteLog(id)
-      await load(date, mode)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not remove that entry")
+      await removeEntries([id], entry?.name ?? "the entry")
     } finally {
       setPendingId(null)
+    }
+  }
+
+  async function bulkMove(ids: number[], next: Meal) {
+    try {
+      await moveLogs(ids, next)
+      await load(date, mode)
+      say(`Moved ${countOf(ids.length)} to ${mealLabel(next).toLowerCase()}`)
+      return true
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not move those entries")
+      return false
+    }
+  }
+
+  async function bulkDuplicate(ids: number[]) {
+    try {
+      const { entries } = await duplicateLogs(ids)
+      await load(date, mode)
+      say(`Duplicated ${countOf(entries.length)}`, async () => {
+        await deleteLogs(entries.map((e) => e.log_id))
+        await load(viewRef.current.date, viewRef.current.mode)
+      })
+      return true
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not duplicate those entries")
+      return false
+    }
+  }
+
+  async function copied(entries: Entry[], fromDate: string) {
+    setCopyOpen(false)
+    await load(date, mode)
+    say(`Copied ${countOf(entries.length)} from ${formatLong(fromDate)}`, async () => {
+      await deleteLogs(entries.map((e) => e.log_id))
+      await load(viewRef.current.date, viewRef.current.mode)
+    })
+  }
+
+  async function toggleKitchen(entry: Entry, inKitchen: boolean) {
+    if (entry.food_id == null) return
+    try {
+      await setKitchen(entry.food_id, inKitchen)
+      await load(date, mode)
+      say(inKitchen ? `Added ${entry.name} to your kitchen` : `Removed ${entry.name} from your kitchen`)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update your kitchen")
+    }
+  }
+
+  async function editRecipe(recipe: Recipe | number) {
+    try {
+      setRecipeDraft({ kind: "edit", recipe: typeof recipe === "number" ? await getRecipe(recipe) : recipe })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not open that recipe")
+    }
+  }
+
+  async function undoToast() {
+    const undo = toast?.undo
+    dismissToast()
+    if (!undo) return
+    try {
+      await undo()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not undo that")
     }
   }
 
@@ -407,6 +517,15 @@ export default function App() {
             onMove={(id, next) => void move(id, next)}
             onDuplicate={(id) => void duplicate(id)}
             onAmount={changeAmount}
+            onKitchen={(entry, inKitchen) => void toggleKitchen(entry, inKitchen)}
+            onBulkMove={bulkMove}
+            onBulkDuplicate={bulkDuplicate}
+            onBulkRemove={(ids) => removeEntries(ids, countOf(ids.length))}
+            onSaveRecipe={(entries) => setRecipeDraft({ kind: "new", entries })}
+            onCopyDay={() => setCopyOpen(true)}
+            onSelectStart={dismissToast}
+            onEditRecipe={(recipe) => void editRecipe(recipe)}
+            listKey={listKey}
             onWeekStart={saveWeekStart}
             onSelectDay={openDay}
           />
@@ -489,7 +608,58 @@ export default function App() {
         }}
       />
 
-      {/* mode switch is handled in a useEffect below */}
+      {/* Copy another day's meals onto this one */}
+      <BottomSheet open={copyOpen} onOpenChange={setCopyOpen}>
+        <BottomSheetContent aria-label="Copy a day" header={<BottomSheetTitle>Copy a day</BottomSheetTitle>}>
+          {copyOpen && (
+            <CopyDaySheet
+              key={date}
+              date={date}
+              onCancel={() => setCopyOpen(false)}
+              onCopied={(entries, fromDate) => void copied(entries, fromDate)}
+            />
+          )}
+        </BottomSheetContent>
+      </BottomSheet>
+
+      {/* Save or edit a recipe */}
+      <BottomSheet open={recipeDraft !== null} onOpenChange={(open) => { if (!open) setRecipeDraft(null) }}>
+        <BottomSheetContent
+          aria-label={recipeDraft?.kind === "edit" ? "Edit recipe" : "Save as recipe"}
+          header={<BottomSheetTitle>{recipeDraft?.kind === "edit" ? "Edit recipe" : "Save as recipe"}</BottomSheetTitle>}
+        >
+          {recipeDraft && (
+            <RecipeSheet
+              key={recipeDraft.kind === "edit" ? recipeDraft.recipe.food_id : "new"}
+              draft={recipeDraft}
+              onCancel={() => setRecipeDraft(null)}
+              onSaved={(recipe, created) => {
+                setRecipeDraft(null)
+                if (created) setListKey((n) => n + 1) // the selection has done its job
+                void load(date, mode)
+                say(created ? `Saved ${recipe.name}. Find it under Recipes.` : `Saved ${recipe.name}`)
+              }}
+              onDeleted={(recipe) => {
+                setRecipeDraft(null)
+                void load(date, mode)
+                say(`Deleted ${recipe.name}`)
+              }}
+            />
+          )}
+        </BottomSheetContent>
+      </BottomSheet>
+
+      {/* Confirmation toast */}
+      {toast && (
+        <div key={toast.id} className="float-bar toast" role="status">
+          <span className="toast-text">{toast.text}</span>
+          {toast.undo && (
+            <button type="button" className="inv-btn" data-tone="accent" style={{ flex: "none", padding: "0 14px" }} onClick={() => void undoToast()}>
+              Undo
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

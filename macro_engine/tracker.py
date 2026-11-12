@@ -696,6 +696,14 @@ def copy_day(con: sqlite3.Connection, from_date: str, to_date: str | None = None
     return {"date": to_date, "from_date": from_date, "entries": entries}
 
 
+def last_logged_day(con: sqlite3.Connection, before: str | None = None) -> str | None:
+    """The most recent day with anything logged before the given day (default
+    today), or None. This is the day worth offering to copy from."""
+    before = _valid_date(before) if before else _today()
+    row = con.execute("SELECT MAX(date) AS date FROM log WHERE date < ?", (before,)).fetchone()
+    return row["date"]
+
+
 def move_log_entries(con: sqlite3.Connection, log_ids, meal: str | None) -> int:
     """Set or clear the meal on several log rows. Returns how many changed."""
     ids = _ids(log_ids)

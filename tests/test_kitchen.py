@@ -412,6 +412,9 @@ class HttpTest(unittest.TestCase):
                                {"from_date": YESTERDAY, "to_date": TODAY, "meals": ["dinner"]})
         self.assertEqual(status, 200)
         self.assertEqual([(e["name"], e["meal"]) for e in self.day()], [("Bananas, raw", "dinner")])
+        self.assertEqual(self.req("GET", f"/api/log/last-day?before={TODAY}")[1], {"date": YESTERDAY})
+        self.assertEqual(self.req("GET", f"/api/log/last-day?before={YESTERDAY}")[1], {"date": None})
+        self.assertEqual(self.req("GET", "/api/log/last-day?before=soon")[0], 400)
         self.assertEqual(self.req("POST", "/api/log/copy", {"from_date": TODAY, "to_date": TODAY})[0], 400)
         self.assertEqual(self.req("POST", "/api/log/copy", {"to_date": TODAY})[0], 400)
 

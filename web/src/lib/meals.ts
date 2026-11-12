@@ -18,3 +18,18 @@ export function defaultMeal(now = new Date()): Meal {
   if (hour < 21) return "dinner"
   return "snacks"
 }
+
+export type MealSection<T> = { id: string; label: string; entries: T[] }
+
+/** Entries grouped under their meal, in meal order; anything else lands in "No meal". */
+export function groupByMeal<T extends { meal: string | null }>(entries: T[]): MealSection<T>[] {
+  const known = new Set<string>(MEALS.map((m) => m.id))
+  const grouped: MealSection<T>[] = MEALS.map((m) => ({
+    id: m.id,
+    label: m.label,
+    entries: entries.filter((e) => e.meal === m.id),
+  })).filter((s) => s.entries.length > 0)
+  const loose = entries.filter((e) => !e.meal || !known.has(e.meal))
+  if (loose.length > 0) grouped.push({ id: "misc", label: "No meal", entries: loose })
+  return grouped
+}

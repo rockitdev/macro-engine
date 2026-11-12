@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { AmountSheet, type AmountChange } from "@/components/amount-sheet"
+import { BottomSheet, BottomSheetContent, BottomSheetTitle } from "@/components/ui/bottom-sheet"
 import { formatGrams, formatKcal } from "@/lib/format"
 import { MEALS, type Meal } from "@/lib/meals"
 import type { Entry } from "@/types"
@@ -32,14 +34,26 @@ export function LogList({
   pendingId,
   onRemove,
   onMove,
+  onDuplicate,
+  onAmount,
 }: {
   entries: Entry[]
   pendingId: number | null
   onRemove: (id: number) => void
   onMove: (id: number, meal: Meal | null) => void
+  onDuplicate: (id: number) => void
+  onAmount: (id: number, change: AmountChange) => Promise<boolean>
 }) {
   const groups = sections(entries)
   const [openMenu, setOpenMenu] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const editing = entries.find((e) => e.log_id === editingId) ?? null
+
+  const menuItem = {
+    all: "unset", boxSizing: "border-box", width: "100%",
+    padding: "7px 12px", borderRadius: 7, fontSize: 14, cursor: "pointer",
+    display: "block",
+  } as const
 
   if (entries.length === 0) {
     return (
@@ -148,6 +162,25 @@ export function LogList({
                           minWidth: 160,
                         }}
                       >
+                        <button
+                          type="button"
+                          onClick={() => { setEditingId(entry.log_id); setOpenMenu(null) }}
+                          style={menuItem}
+                          onMouseOver={(e) => (e.currentTarget.style.background = "var(--me-bg)")}
+                          onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                        >
+                          Change amount
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { onDuplicate(entry.log_id); setOpenMenu(null) }}
+                          style={menuItem}
+                          onMouseOver={(e) => (e.currentTarget.style.background = "var(--me-bg)")}
+                          onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                        >
+                          Duplicate
+                        </button>
+                        <div style={{ height: 1, background: "var(--me-mist)", margin: "4px 0" }} />
                         {/* Move to meal */}
                         {MEALS.filter((m) => m.id !== entry.meal).map((m) => (
                           <button
@@ -197,6 +230,23 @@ export function LogList({
           aria-hidden="true"
         />
       )}
+
+      {/* Change amount */}
+      <BottomSheet open={editing !== null} onOpenChange={(open) => { if (!open) setEditingId(null) }}>
+        <BottomSheetContent aria-label="Change amount" header={<BottomSheetTitle>Change amount</BottomSheetTitle>}>
+          {editing && (
+            <AmountSheet
+              key={editing.log_id}
+              entry={editing}
+              busy={pendingId === editing.log_id}
+              onCancel={() => setEditingId(null)}
+              onSave={(change) => {
+                void onAmount(editing.log_id, change).then((ok) => { if (ok) setEditingId(null) })
+              }}
+            />
+          )}
+        </BottomSheetContent>
+      </BottomSheet>
     </section>
   )
 }

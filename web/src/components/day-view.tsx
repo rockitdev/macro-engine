@@ -1,3 +1,4 @@
+import type { AmountChange } from "@/components/amount-sheet"
 import { Composer } from "@/components/composer"
 import { LogList } from "@/components/log-list"
 import { MacroRing } from "@/components/macro-ring"
@@ -24,6 +25,8 @@ export function DayView({
   onAddFood,
   onRemove,
   onMove,
+  onDuplicate,
+  onAmount,
   onWeekStart,
   onSelectDay,
 }: {
@@ -39,6 +42,8 @@ export function DayView({
   onAddFood: (name: string) => void
   onRemove: (id: number) => void
   onMove: (id: number, next: Meal | null) => void
+  onDuplicate: (id: number) => void
+  onAmount: (id: number, change: AmountChange) => Promise<boolean>
   onWeekStart: (day: string) => Promise<void>
   onSelectDay: (date: string) => void
 }) {
@@ -78,6 +83,8 @@ export function DayView({
           pendingId={pendingId}
           onRemove={onRemove}
           onMove={onMove}
+          onDuplicate={onDuplicate}
+          onAmount={onAmount}
         />
       </div>
 

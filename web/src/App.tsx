@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { ApiError, deleteLog, getDay, getFood, getMonth, getWeek, setLogMeal, setWeekStart } from "@/api"
+import { ApiError, deleteLog, duplicateLog, getDay, getFood, getMonth, getWeek, setLogAmount, setLogMeal, setWeekStart } from "@/api"
+import type { AmountChange } from "@/components/amount-sheet"
 import { DayView } from "@/components/day-view"
 import { FitMealDialog } from "@/components/fit-meal-dialog"
 import { FoodDialog } from "@/components/food-dialog"
@@ -229,6 +230,32 @@ export default function App() {
     }
   }
 
+  async function duplicate(id: number) {
+    setPendingId(id)
+    try {
+      await duplicateLog(id)
+      await load(date, mode)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not duplicate that entry")
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  async function changeAmount(id: number, change: AmountChange) {
+    setPendingId(id)
+    try {
+      await setLogAmount(id, change)
+      await load(date, mode)
+      return true
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change that amount")
+      return false
+    } finally {
+      setPendingId(null)
+    }
+  }
+
   async function remove(id: number) {
     setPendingId(id)
     try {
@@ -378,6 +405,8 @@ export default function App() {
             onAddFood={(name) => { setFoodName(name); setFoodOpen(true) }}
             onRemove={(id) => void remove(id)}
             onMove={(id, next) => void move(id, next)}
+            onDuplicate={(id) => void duplicate(id)}
+            onAmount={changeAmount}
             onWeekStart={saveWeekStart}
             onSelectDay={openDay}
           />

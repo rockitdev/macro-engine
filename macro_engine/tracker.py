@@ -139,6 +139,11 @@ def _resolve_grams(con: sqlite3.Connection, food: dict, item: dict, alias_grams=
             g = qty * MASS_GRAMS[canon]
             return g, f"{qty:g} {canon} ({g:g} g)"
         variants = {unit, canon}
+        # A full portion label ("1 slice") picks that portion exactly, before
+        # the looser substring match can land on a longer one ("1 slice, thick").
+        for p in portions:
+            if p["label"].lower() in variants:
+                return qty * p["grams"], f"{qty:g} x {p['label']}"
         for p in portions:
             if any(v in p["label"].lower() for v in variants):
                 return qty * p["grams"], f"{qty:g} x {p['label']}"
@@ -167,9 +172,10 @@ def _meal(value) -> str | None:
     return meal
 
 
-def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | None,
-              meal: str | None = None) -> dict:
-    """Process one meal item into {'logged': entry} or {'problem': info}.
+def _resolve_item(con: sqlite3.Connection, item: dict) -> dict:
+    """Work out what one meal item is, without logging it. Returns
+    {'row': {...}} (food_id, name, qty_desc, grams, estimated, the macros, and
+    for lookups matched_alias / runner_up) or {'problem': info}.
 
     Raises ValueError (incl. UnresolvedUnit) for invalid input so the caller can
     route it to 'problems' without aborting the rest of the meal."""
@@ -181,15 +187,8 @@ def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | No
                 for k in MACROS}
         name = _text(item.get("name") or "estimate", "name")
         grams = _num(item.get("grams"), "grams", allow_none=True, positive=True)
-        cur = con.execute(
-            """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
-                                carb_g, fat_g, fiber_g, raw_text, estimated, meal)
-               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
-            (date, name, grams, vals["kcal"], vals["protein_g"], vals["carb_g"],
-             vals["fat_g"], vals["fiber_g"], raw_text or name, meal),
-        )
-        return {"logged": {"log_id": cur.lastrowid, "name": name,
-                           "estimated": True, "meal": meal, **vals}}
+        return {"row": {"food_id": None, "name": name, "qty_desc": None,
+                        "grams": grams, "estimated": True, **vals}}
 
     food, alias_grams, candidates = None, None, []
     if item.get("food_id"):
@@ -214,19 +213,70 @@ def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | No
     grams, qty_desc = _resolve_grams(con, food, item, alias_grams)
     scale = grams / 100.0
     vals = {k: round((food.get(k) or 0) * scale, 1) for k in MACROS}
+    return {"row": {
+        "food_id": food["id"], "name": food["name"], "qty_desc": qty_desc,
+        "grams": grams, "estimated": False, **vals,
+        "matched_alias": bool(food.get("matched_alias")),
+        "runner_up": candidates[1]["name"] if len(candidates) > 1 else None,
+    }}
+
+
+def resolve_items(con: sqlite3.Connection, items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Resolve meal items (same shapes as log_meal) without logging them.
+    Returns (rows, problems)."""
+    rows, problems = [], []
+    for item in items:
+        if not isinstance(item, dict):
+            problems.append({"item": item, "reason": "item must be an object"})
+            continue
+        try:
+            result = _resolve_item(con, item)
+        except UnresolvedUnit as e:
+            problems.append({"item": item, "reason": str(e),
+                             "available_portions": [p["label"] for p in e.portions]})
+        except ValueError as e:
+            problems.append({"item": item, "reason": str(e)})
+        else:
+            if "problem" in result:
+                problems.append(result["problem"])
+            else:
+                rows.append(result["row"])
+    return rows, problems
+
+
+def _log_item(con: sqlite3.Connection, item: dict, date: str, raw_text: str | None,
+              meal: str | None = None) -> dict:
+    """Process one meal item into {'logged': entry} or {'problem': info}."""
+    result = _resolve_item(con, item)
+    if "problem" in result:
+        return result
+    row = result["row"]
+    vals = {k: row[k] for k in MACROS}
+    if row["estimated"]:
+        name = row["name"]
+        cur = con.execute(
+            """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
+                                carb_g, fat_g, fiber_g, raw_text, estimated, meal)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+            (date, name, row["grams"], vals["kcal"], vals["protein_g"], vals["carb_g"],
+             vals["fat_g"], vals["fiber_g"], raw_text or name, meal),
+        )
+        return {"logged": {"log_id": cur.lastrowid, "name": name,
+                           "estimated": True, "meal": meal, **vals}}
+
     cur = con.execute(
         """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g,
                             carb_g, fat_g, fiber_g, raw_text, estimated, meal)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)""",
-        (date, food["id"], qty_desc, grams, vals["kcal"], vals["protein_g"],
-         vals["carb_g"], vals["fat_g"], vals["fiber_g"],
+        (date, row["food_id"], row["qty_desc"], row["grams"], vals["kcal"],
+         vals["protein_g"], vals["carb_g"], vals["fat_g"], vals["fiber_g"],
          raw_text or item.get("query"), meal),
     )
     return {"logged": {
-        "log_id": cur.lastrowid, "food_id": food["id"], "name": food["name"],
-        "matched_alias": bool(food.get("matched_alias")), "qty": qty_desc,
-        "grams": round(grams, 1), "estimated": False, "meal": meal, **vals,
-        "runner_up": candidates[1]["name"] if len(candidates) > 1 else None,
+        "log_id": cur.lastrowid, "food_id": row["food_id"], "name": row["name"],
+        "matched_alias": row["matched_alias"], "qty": row["qty_desc"],
+        "grams": round(row["grams"], 1), "estimated": False, "meal": meal, **vals,
+        "runner_up": row["runner_up"],
     }}
 
 
@@ -558,7 +608,8 @@ def month_summary(con: sqlite3.Connection, date: str | None = None, *,
 
 _ENTRY_SQL = """SELECT l.id AS log_id, l.ts, l.food_id, l.qty_desc, l.grams, l.kcal,
                        l.protein_g, l.carb_g, l.fat_g, l.fiber_g, l.estimated, l.meal,
-                       COALESCE(f.name, l.qty_desc) AS name
+                       COALESCE(f.name, l.qty_desc) AS name,
+                       COALESCE(f.in_kitchen, 0) AS in_kitchen
                 FROM log l LEFT JOIN foods f ON f.id = l.food_id"""
 
 
@@ -573,22 +624,132 @@ def _entry(con: sqlite3.Connection, log_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+_LOG_COLS = ("date, food_id, qty_desc, grams, kcal, protein_g, carb_g, fat_g, "
+             "fiber_g, raw_text, estimated, meal")
+KEEP = object()  # "leave the meal as it is" (None means "no meal")
+
+
+def _ids(log_ids) -> list[int]:
+    if not isinstance(log_ids, (list, tuple)) or not log_ids:
+        raise ValueError("log_ids must be a non-empty list")
+    out = []
+    for value in log_ids:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("log_ids must be integers")
+        if value not in out:
+            out.append(value)
+    return out
+
+
+def copy_log_entries(con: sqlite3.Connection, log_ids, date: str | None = None,
+                     meal=KEEP) -> list[dict]:
+    """Log existing rows again: each copy keeps the row's amount and its own
+    denormalized macros. date (YYYY-MM-DD) puts the copies on another day;
+    meal moves them to a meal (None = no meal). Both default to the source
+    row's. Unknown ids are skipped. Returns the new entries in day_log shape."""
+    ids = _ids(log_ids)
+    date = _valid_date(date) if date else None
+    stored_meal = meal if meal is KEEP else _meal(meal)
+    new_ids = []
+    for log_id in ids:
+        cur = con.execute(
+            f"""INSERT INTO log ({_LOG_COLS})
+                SELECT COALESCE(?, date), food_id, qty_desc, grams, kcal, protein_g,
+                       carb_g, fat_g, fiber_g, raw_text, estimated,
+                       CASE WHEN ? THEN meal ELSE ? END
+                FROM log WHERE id = ?""",
+            (date, meal is KEEP, None if meal is KEEP else stored_meal, log_id),
+        )
+        if cur.rowcount:
+            new_ids.append(cur.lastrowid)
+    con.commit()
+    return [_entry(con, i) for i in new_ids]
+
+
 def duplicate_log_entry(con: sqlite3.Connection, log_id: int) -> dict | None:
     """Log the same thing again: copy one row (same date, meal, amount, and its
     own denormalized macros) as a new entry. Returns the new entry in day_log
     shape, or None when the id is missing."""
-    cur = con.execute(
-        """INSERT INTO log (date, food_id, qty_desc, grams, kcal, protein_g, carb_g,
-                            fat_g, fiber_g, raw_text, estimated, meal)
-           SELECT date, food_id, qty_desc, grams, kcal, protein_g, carb_g,
-                  fat_g, fiber_g, raw_text, estimated, meal
-           FROM log WHERE id = ?""",
-        (int(log_id),),
-    )
+    copies = copy_log_entries(con, [int(log_id)])
+    return copies[0] if copies else None
+
+
+def copy_day(con: sqlite3.Connection, from_date: str, to_date: str | None = None,
+             meals=None) -> dict:
+    """Copy what was logged on from_date onto to_date (default today), keeping
+    each entry's meal. meals limits it to some meals: a list of breakfast,
+    lunch, dinner, snacks, and/or None for entries with no meal. Returns
+    {'date', 'entries': the new entries}."""
+    from_date = _valid_date(from_date)
+    to_date = _valid_date(to_date) if to_date else _today()
+    if from_date == to_date:
+        raise ValueError("pick a different day to copy from")
+    rows = con.execute("SELECT id, meal FROM log WHERE date = ? ORDER BY id",
+                       (from_date,)).fetchall()
+    if meals is not None:
+        if not isinstance(meals, (list, tuple)) or not meals:
+            raise ValueError("meals must be a non-empty list")
+        wanted = {_meal(m) for m in meals}
+        rows = [r for r in rows if (r["meal"] if r["meal"] in MEALS else None) in wanted]
+    ids = [r["id"] for r in rows]
+    entries = copy_log_entries(con, ids, to_date) if ids else []
+    return {"date": to_date, "from_date": from_date, "entries": entries}
+
+
+def move_log_entries(con: sqlite3.Connection, log_ids, meal: str | None) -> int:
+    """Set or clear the meal on several log rows. Returns how many changed."""
+    ids = _ids(log_ids)
+    stored = _meal(meal)
+    marks = ",".join("?" * len(ids))
+    cur = con.execute(f"UPDATE log SET meal = ? WHERE id IN ({marks})", (stored, *ids))
     con.commit()
-    if cur.rowcount == 0:
-        return None
-    return _entry(con, cur.lastrowid)
+    return cur.rowcount
+
+
+def delete_log_entries(con: sqlite3.Connection, log_ids) -> list[int]:
+    """Remove log rows. They are kept in log_trash for 30 days so the removal
+    can be undone with restore_log_entries. Returns the ids actually removed."""
+    ids = _ids(log_ids)
+    marks = ",".join("?" * len(ids))
+    found = [r["id"] for r in con.execute(
+        f"SELECT id FROM log WHERE id IN ({marks}) ORDER BY id", ids)]
+    if found:
+        marks = ",".join("?" * len(found))
+        con.execute("DELETE FROM log_trash WHERE deleted_at < datetime('now', 'localtime', '-30 days')")
+        con.execute(
+            f"""INSERT INTO log_trash (id, ts, {_LOG_COLS})
+                SELECT id, ts, {_LOG_COLS} FROM log WHERE id IN ({marks})""", found)
+        con.execute(f"DELETE FROM log WHERE id IN ({marks})", found)
+    con.commit()
+    return found
+
+
+def restore_log_entries(con: sqlite3.Connection, log_ids) -> list[dict]:
+    """Undo delete_log_entries: put removed rows back as they were. A row keeps
+    its old id unless something else has taken it since. Ids that were never
+    removed (or were removed more than 30 days ago) are skipped. Returns the
+    restored entries in day_log shape."""
+    restored = []
+    for log_id in _ids(log_ids):
+        row = con.execute(
+            "SELECT * FROM log_trash WHERE id = ? ORDER BY trash_id DESC LIMIT 1",
+            (log_id,)).fetchone()
+        if row is None:
+            continue
+        taken = con.execute("SELECT 1 FROM log WHERE id = ?", (log_id,)).fetchone()
+        values = [row[c.strip()] for c in _LOG_COLS.split(",")]
+        marks = ",".join("?" * len(values))
+        if taken:
+            cur = con.execute(
+                f"INSERT INTO log (ts, {_LOG_COLS}) VALUES (?, {marks})", (row["ts"], *values))
+        else:
+            cur = con.execute(
+                f"INSERT INTO log (id, ts, {_LOG_COLS}) VALUES (?, ?, {marks})",
+                (log_id, row["ts"], *values))
+        con.execute("DELETE FROM log_trash WHERE trash_id = ?", (row["trash_id"],))
+        restored.append(cur.lastrowid)
+    con.commit()
+    return [_entry(con, i) for i in restored]
 
 
 _NUM = r"(\d+(?:\.\d+)?)"
@@ -665,9 +826,8 @@ def set_log_meal(con: sqlite3.Connection, log_id: int, meal: str | None) -> dict
 
 
 def delete_log_entry(con: sqlite3.Connection, log_id: int) -> bool:
-    cur = con.execute("DELETE FROM log WHERE id = ?", (log_id,))
-    con.commit()
-    return cur.rowcount > 0
+    """Remove one log row (undo with restore_log_entries)."""
+    return bool(delete_log_entries(con, [int(log_id)]))
 
 
 def add_food(con: sqlite3.Connection, name: str, kcal: float, protein_g: float,

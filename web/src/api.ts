@@ -1,4 +1,4 @@
-import type { ActivitySummary, BarcodeFood, CheckIn, Day, Entry, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Plan, Profile, Progress, Targets, Week, Workout } from "./types"
+import type { ActivitySummary, BarcodeFood, CheckIn, Day, Entry, FitMacroBudget, FitMealResult, Food, MealResult, Month, NewFood, Pick, Plan, Profile, Progress, Recipe, RecipeResult, Targets, Week, Workout } from "./types"
 
 export class ApiError extends Error {}
 
@@ -105,6 +105,86 @@ export function setLogAmount(id: number, change: { grams: number } | { scale: nu
 
 export function duplicateLog(id: number) {
   return request<Entry>(`/api/log/${id}/duplicate`, { method: "POST" })
+}
+
+/** Several entries at once. Deleted entries can be brought back with restoreLogs. */
+export function moveLogs(ids: number[], meal: string | null) {
+  return request<{ moved: number }>("/api/log/batch", {
+    method: "POST",
+    body: JSON.stringify({ ids, action: "move", meal }),
+  })
+}
+
+export function duplicateLogs(ids: number[]) {
+  return request<{ entries: Entry[] }>("/api/log/batch", {
+    method: "POST",
+    body: JSON.stringify({ ids, action: "duplicate" }),
+  })
+}
+
+export function deleteLogs(ids: number[]) {
+  return request<{ deleted: number[] }>("/api/log/batch", {
+    method: "POST",
+    body: JSON.stringify({ ids, action: "delete" }),
+  })
+}
+
+export function restoreLogs(ids: number[]) {
+  return request<{ entries: Entry[] }>("/api/log/batch", {
+    method: "POST",
+    body: JSON.stringify({ ids, action: "restore" }),
+  })
+}
+
+/** Copy another day's entries onto `to_date`. `meals` limits it (null = entries with no meal). */
+export function copyDay(body: { from_date: string; to_date: string; meals?: (string | null)[] }) {
+  return request<{ date: string; from_date: string; entries: Entry[] }>("/api/log/copy", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+/** The most recent day before `before` with anything logged, if there is one. */
+export function getLastLoggedDay(before: string) {
+  return request<{ date: string | null }>(`/api/log/last-day?before=${encodeURIComponent(before)}`)
+}
+
+// ── Quick logging: usuals, My Kitchen, recipes ──────────────────────────────
+
+export function getUsuals(meal: string, date: string, signal?: AbortSignal) {
+  const params = new URLSearchParams({ meal, date, limit: "12" })
+  return request<{ usual: Pick[] }>(`/api/picks?${params}`, { signal })
+}
+
+export function getKitchen(date: string, signal?: AbortSignal) {
+  return request<{ foods: Pick[] }>(`/api/kitchen?date=${encodeURIComponent(date)}`, { signal })
+}
+
+export function setKitchen(foodId: number, inKitchen: boolean) {
+  return request<Food>(`/api/foods/${foodId}/kitchen`, {
+    method: "POST",
+    body: JSON.stringify({ in_kitchen: inKitchen }),
+  })
+}
+
+export function getRecipes(signal?: AbortSignal) {
+  return request<{ recipes: Recipe[] }>("/api/recipes", { signal })
+}
+
+export function getRecipe(id: number) {
+  return request<Recipe>(`/api/recipes/${id}`)
+}
+
+export function createRecipe(body: { name: string; servings: number; log_ids: number[] }) {
+  return request<RecipeResult>("/api/recipes", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function updateRecipe(id: number, body: { name?: string; servings?: number; remove_item_ids?: number[] }) {
+  return request<RecipeResult>(`/api/recipes/${id}`, { method: "POST", body: JSON.stringify(body) })
+}
+
+export function deleteRecipe(id: number) {
+  return request<{ deleted: boolean }>(`/api/recipes/${id}`, { method: "DELETE" })
 }
 
 export function setTargets(body: {

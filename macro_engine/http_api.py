@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import activity, barcode as _barcode_mod, coach, db, fit_meal as _fit_meal_mod, health_import, resolve, tracker
+from . import activity, barcode as _barcode_mod, coach, db, fit_meal as _fit_meal_mod, health_import, kitchen, resolve, tracker
 from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,13 +40,18 @@ MIME = {
 }
 
 
-def _food_detail(con, food_id: int) -> dict | None:
-    food = resolve.get_food(con, food_id)
-    if not food:
-        return None
-    food["portions"] = resolve.get_portions(con, food_id)
-    food["matched_alias"] = False
-    return food
+_food_detail = kitchen.food_detail
+
+
+def _recipe_fields(body: dict) -> dict:
+    """The ingredient/shape fields shared by creating and updating a recipe."""
+    out = {}
+    for key in ("items", "log_ids"):
+        if body.get(key) is not None:
+            if not isinstance(body[key], list):
+                raise ValueError(f"{key} must be a list")
+            out[key] = body[key]
+    return out
 
 
 def _day(con, date: str | None) -> dict:
@@ -261,6 +266,43 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
             _send_json(handler, 200, tracker.log_meal(con, items, date, raw_text, body.get("meal")))
         return
 
+    # Several log rows at once. action: move (needs meal) | duplicate | delete | restore.
+    if method == "POST" and path == "/api/log/batch":
+        body = _read_body(handler)
+        _missing(body, "ids", "action")
+        ids, action = body["ids"], body["action"]
+        with _connect() as con:
+            if action == "move":
+                if "meal" not in body:
+                    raise ValueError("missing meal")
+                result = {"moved": tracker.move_log_entries(con, ids, body["meal"])}
+            elif action == "duplicate":
+                result = {"entries": tracker.copy_log_entries(con, ids)}
+            elif action == "delete":
+                result = {"deleted": tracker.delete_log_entries(con, ids)}
+            elif action == "restore":
+                result = {"entries": tracker.restore_log_entries(con, ids)}
+            else:
+                raise ValueError("action must be move, duplicate, delete, or restore")
+        _send_json(handler, 200, result)
+        return
+
+    # The latest day with entries before ?before= (default today): the copy default.
+    if method == "GET" and path == "/api/log/last-day":
+        before = (qs.get("before") or [None])[0]
+        with _connect() as con:
+            _send_json(handler, 200, {"date": tracker.last_logged_day(con, before or None)})
+        return
+
+    # Copy another day's entries (optionally only some meals) onto a day.
+    if method == "POST" and path == "/api/log/copy":
+        body = _read_body(handler)
+        _missing(body, "from_date")
+        with _connect() as con:
+            _send_json(handler, 200, tracker.copy_day(
+                con, body["from_date"], body.get("to_date"), body.get("meals")))
+        return
+
     if method == "POST" and len(parts) == 3 and parts[:2] == ["api", "log"]:
         log_id = _as_int(parts[2], "log_id")
         body = _read_body(handler)
@@ -301,6 +343,61 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         if not deleted:
             raise ApiError(404, f"no log entry {log_id}")
         _send_json(handler, 200, {"deleted": True, "log_id": log_id})
+        return
+
+    # The quick ways to log: usual foods for a meal, My Kitchen, recipes.
+    if method == "GET" and path == "/api/picks":
+        meal = (qs.get("meal") or [None])[0]
+        with _connect() as con:
+            _send_json(handler, 200, {
+                "usual": kitchen.usual_picks(con, meal, _query_date(qs), _query_limit(qs))})
+        return
+
+    if method == "GET" and path == "/api/kitchen":
+        with _connect() as con:
+            _send_json(handler, 200, {"foods": kitchen.kitchen_list(con, _query_date(qs))})
+        return
+
+    if (method == "POST" and len(parts) == 4 and parts[:2] == ["api", "foods"]
+            and parts[3] == "kitchen"):
+        food_id = _as_int(parts[2], "food_id")
+        body = _read_body(handler)
+        _missing(body, "in_kitchen")
+        with _connect() as con:
+            food = kitchen.set_kitchen(con, food_id, body["in_kitchen"])
+        if not food:
+            raise ApiError(404, f"no food {food_id}")
+        _send_json(handler, 200, food)
+        return
+
+    if method == "GET" and path == "/api/recipes":
+        with _connect() as con:
+            _send_json(handler, 200, {"recipes": kitchen.list_recipes(con)})
+        return
+
+    if method == "POST" and path == "/api/recipes":
+        body = _read_body(handler)
+        _missing(body, "name")
+        with _connect() as con:
+            _send_json(handler, 200, kitchen.create_recipe(
+                con, body["name"], body.get("servings", 1), **_recipe_fields(body)))
+        return
+
+    if len(parts) == 3 and parts[:2] == ["api", "recipes"] and method in ("GET", "POST", "DELETE"):
+        recipe_id = _as_int(parts[2], "recipe_id")
+        with _connect() as con:
+            if method == "GET":
+                result = kitchen.get_recipe(con, recipe_id)
+            elif method == "DELETE":
+                result = {"deleted": True} if kitchen.delete_recipe(con, recipe_id) else None
+            else:
+                body = _read_body(handler)
+                result = kitchen.update_recipe(
+                    con, recipe_id, body.get("name"), body.get("servings"),
+                    body.get("remove_item_ids"), **_recipe_fields(body))
+        if result is None:
+            raise ApiError(404, f"no recipe {recipe_id}")
+        _send_json(handler, 200, result)
         return
 
     if method == "GET" and path == "/api/foods":

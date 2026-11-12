@@ -57,6 +57,12 @@ Tools: `log_meal`, `remaining`, `day_summary`, `week_summary`, `month_summary`,
 `search_food`, `set_targets`, `set_week_start`, `add_food`, `add_alias`,
 `delete_log_entry`, `fit_meal`, plus the coaching tools below.
 
+Corrections and quick logging: `update_log_entry` (amount or meal in place),
+`duplicate_log_entry`, `restore_log_entry` (undo a delete, 30 days),
+`copy_day`, `set_kitchen` / `list_kitchen` (foods kept on hand), and
+`save_recipe` / `list_recipes` / `update_recipe` / `delete_recipe` (a recipe is
+a food logged by serving).
+
 ## Coaching (Fat Loss Forever)
 
 Food logging tells you what you ate. The coaching layer tells you what to do

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS foods (
     source    TEXT NOT NULL,
     source_id TEXT,
     verified  INTEGER NOT NULL DEFAULT 1,
+    -- 1 = a food Ryan keeps on hand ("My Kitchen"); set by him, never by ETL
+    in_kitchen INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source, source_id)
 );
 
@@ -79,6 +81,57 @@ CREATE TABLE IF NOT EXISTS log (
     meal      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_log_date ON log(date);
+
+-- Removed log rows, kept so a delete can be undone. id is the row's old log id
+-- (not unique: an id can be reused and removed again). Purged after 30 days.
+CREATE TABLE IF NOT EXISTS log_trash (
+    trash_id   INTEGER PRIMARY KEY,
+    id         INTEGER NOT NULL,
+    ts         TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    food_id    INTEGER,
+    qty_desc   TEXT,
+    grams      REAL,
+    kcal       REAL NOT NULL DEFAULT 0,
+    protein_g  REAL NOT NULL DEFAULT 0,
+    carb_g     REAL NOT NULL DEFAULT 0,
+    fat_g      REAL NOT NULL DEFAULT 0,
+    fiber_g    REAL NOT NULL DEFAULT 0,
+    raw_text   TEXT,
+    estimated  INTEGER NOT NULL DEFAULT 0,
+    meal       TEXT,
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_log_trash_id ON log_trash(id);
+
+-- A recipe is a food (foods.source = 'recipe') built from ingredients. The
+-- food row carries the per-100 g macros and a "1 serving" portion, so recipes
+-- log like any other food. archived = deleted by the user but kept because
+-- log history still points at the food.
+CREATE TABLE IF NOT EXISTS recipes (
+    food_id    INTEGER PRIMARY KEY REFERENCES foods(id) ON DELETE CASCADE,
+    servings   REAL NOT NULL,
+    archived   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Ingredients keep their own macros (like log rows), so a recipe does not
+-- change when an ingredient food is later re-imported.
+CREATE TABLE IF NOT EXISTS recipe_items (
+    id        INTEGER PRIMARY KEY,
+    recipe_id INTEGER NOT NULL REFERENCES recipes(food_id) ON DELETE CASCADE,
+    food_id   INTEGER REFERENCES foods(id),
+    name      TEXT NOT NULL,
+    qty_desc  TEXT,
+    grams     REAL,
+    kcal      REAL NOT NULL DEFAULT 0,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carb_g    REAL NOT NULL DEFAULT 0,
+    fat_g     REAL NOT NULL DEFAULT 0,
+    fiber_g   REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_recipe_items_recipe ON recipe_items(recipe_id);
 
 -- Latest row (by effective_date, then id) at or before a given date wins.
 CREATE TABLE IF NOT EXISTS targets (
@@ -221,6 +274,8 @@ def _migrate(con: sqlite3.Connection) -> None:
     if "store" not in cols:
         con.execute("ALTER TABLE foods ADD COLUMN store TEXT")
         rebuild_fts(con)  # FTS gained the store column
+    if "in_kitchen" not in cols:
+        con.execute("ALTER TABLE foods ADD COLUMN in_kitchen INTEGER NOT NULL DEFAULT 0")
     tcols = {r["name"] for r in con.execute("PRAGMA table_info(targets)")}
     if "fiber_g" not in tcols:
         con.execute("ALTER TABLE targets ADD COLUMN fiber_g REAL")
@@ -246,8 +301,14 @@ def rebuild_fts(con: sqlite3.Connection) -> None:
     tables can't delete rows, so ETL re-runs rebuild instead)."""
     con.execute("DROP TABLE IF EXISTS food_fts")
     con.execute("CREATE VIRTUAL TABLE food_fts USING fts5(name, brand, store, content='', tokenize='porter unicode61')")
+    # Deleted recipes stay as foods (log history names them) but are not
+    # searchable. Callers may hand in a database opened without connect().
+    has_recipes = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'recipes'").fetchone()
     con.execute(
         "INSERT INTO food_fts(rowid, name, brand, store) "
         "SELECT id, name, COALESCE(brand, ''), COALESCE(store, '') FROM foods"
+        + (" WHERE id NOT IN (SELECT food_id FROM recipes WHERE archived = 1)"
+           if has_recipes else "")
     )
     con.commit()

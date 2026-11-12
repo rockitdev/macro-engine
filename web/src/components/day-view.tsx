@@ -5,7 +5,7 @@ import { MacroRing } from "@/components/macro-ring"
 import { WeekSidebar } from "@/components/week-sidebar"
 import { formatGrams, formatKcal } from "@/lib/format"
 import { type Meal } from "@/lib/meals"
-import type { Day, Food, Week } from "@/types"
+import type { Day, Entry, Food, Recipe, Week } from "@/types"
 
 /**
  * Day view — two-column on desktop, single-column on mobile.
@@ -27,6 +27,15 @@ export function DayView({
   onMove,
   onDuplicate,
   onAmount,
+  onKitchen,
+  onBulkMove,
+  onBulkDuplicate,
+  onBulkRemove,
+  onSaveRecipe,
+  onCopyDay,
+  onSelectStart,
+  onEditRecipe,
+  listKey,
   onWeekStart,
   onSelectDay,
 }: {
@@ -44,9 +53,22 @@ export function DayView({
   onMove: (id: number, next: Meal | null) => void
   onDuplicate: (id: number) => void
   onAmount: (id: number, change: AmountChange) => Promise<boolean>
+  onKitchen: (entry: Entry, inKitchen: boolean) => void
+  onBulkMove: (ids: number[], meal: Meal) => Promise<boolean>
+  onBulkDuplicate: (ids: number[]) => Promise<boolean>
+  onBulkRemove: (ids: number[]) => Promise<boolean>
+  onSaveRecipe: (entries: Entry[]) => void
+  onCopyDay: () => void
+  onSelectStart: () => void
+  onEditRecipe: (recipe: Recipe | number) => void
+  /** Bumped to drop the log's selection (after a recipe is saved from it). */
+  listKey: number
   onWeekStart: (day: string) => Promise<void>
   onSelectDay: (date: string) => void
 }) {
+  const hadFoodIds = new Set(
+    day.entries.filter((e) => e.meal === meal && e.food_id != null).map((e) => e.food_id as number),
+  )
   return (
     <div
       style={{
@@ -74,17 +96,28 @@ export function DayView({
             onSeedConsumed={onSeedConsumed}
             onLogged={onLogged}
             onAddFood={onAddFood}
+            stamp={day}
+            hadFoodIds={hadFoodIds}
+            onEditRecipe={onEditRecipe}
           />
         </section>
 
         {/* Eaten list */}
         <LogList
+          key={`${date}:${listKey}`}
           entries={day.entries}
           pendingId={pendingId}
           onRemove={onRemove}
           onMove={onMove}
           onDuplicate={onDuplicate}
           onAmount={onAmount}
+          onKitchen={onKitchen}
+          onBulkMove={onBulkMove}
+          onBulkDuplicate={onBulkDuplicate}
+          onBulkRemove={onBulkRemove}
+          onSaveRecipe={onSaveRecipe}
+          onCopyDay={onCopyDay}
+          onSelectStart={onSelectStart}
         />
       </div>
 

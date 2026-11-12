@@ -8,7 +8,7 @@ or via .mcp.json (see README).
 
 from mcp.server.fastmcp import FastMCP
 
-from macro_engine import coach, db, fit_meal as _fit_meal_mod, resolve, tracker
+from macro_engine import coach, db, fit_meal as _fit_meal_mod, kitchen, resolve, tracker
 
 mcp = FastMCP(
     "macro-engine",
@@ -20,12 +20,16 @@ mcp = FastMCP(
         "it under 'problems' with candidates; either re-log with a chosen food_id "
         "or supply a manual macros estimate. When the user corrects a wrong "
         "match, fix the log (delete_log_entry + re-log) AND save an alias so it "
-        "resolves right next time. Log immediately — never block on ambiguity; "
+        "resolves right next time. When only the amount or the meal was wrong, "
+        "use update_log_entry instead of re-logging. 'Same as yesterday' is "
+        "copy_day; 'another one' is duplicate_log_entry. Log immediately — never block on ambiguity; "
         "prefer a flagged estimate over asking twice. Store-qualified phrases "
         "('the breaded chicken burgers from Costco') are pantry items: search "
         "first (store names are indexed), and on a miss research the actual "
         "product's label, add_food with store + the user's phrase as alias, then "
-        "log. One-time setup, zero-friction forever.\n\n"
+        "log. One-time setup, zero-friction forever. Foods the user keeps on "
+        "hand go in My Kitchen (set_kitchen); a dish they make repeatedly is a "
+        "recipe (save_recipe), logged by serving like any other food.\n\n"
         "Coaching (evidence-based, from Fat Loss Forever): the user weighs in "
         "daily -> log_weight. Judge progress only by weekly averages, never a "
         "single weigh-in (1-2% daily swings are water; up to 4% premenstrually). "
@@ -200,10 +204,186 @@ def add_alias(phrase: str, food_id: int, default_grams: float | None = None) -> 
 
 @mcp.tool()
 def delete_log_entry(log_id: int) -> dict:
-    """Remove a log entry (corrections). Get log_id from day_summary."""
+    """Remove a log entry (corrections). Get log_id from day_summary. A removal
+    can be undone for 30 days with restore_log_entry."""
     con = _con()
     try:
         return {"deleted": tracker.delete_log_entry(con, log_id), "log_id": log_id}
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def restore_log_entry(log_id: int) -> dict:
+    """Undo delete_log_entry: put a removed entry back as it was. Returns
+    {"restored": bool, "entry": the entry or null}. The entry keeps its old
+    log_id unless another entry has taken it since — read log_id from "entry"."""
+    con = _con()
+    try:
+        entries = tracker.restore_log_entries(con, [log_id])
+        return {"restored": bool(entries), "entry": entries[0] if entries else None}
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def update_log_entry(log_id: int, grams: float | None = None,
+                     scale: float | None = None, meal: str | None = None) -> dict:
+    """Correct an entry in place instead of deleting and re-logging it. Get
+    log_id from day_summary. Give any of:
+    - grams: the new weight in grams (only for entries that have a weight), OR
+    - scale: a multiplier on what is logged now (2 = twice as much, 0.5 = half).
+      Use scale for portion counts ("I had 3 slices, not 2" -> scale 1.5) and
+      for manual estimates with no weight. grams and scale are exclusive.
+    - meal: breakfast, lunch, dinner, or snacks — moves the entry to that meal.
+    The entry's own stored macros are scaled; the food is not looked up again.
+    Returns the updated entry."""
+    if grams is None and scale is None and meal is None:
+        raise ValueError("give grams, scale, or meal")
+    if meal is not None:
+        tracker._meal(meal)  # validate before touching the amount
+    con = _con()
+    try:
+        entry = None
+        if grams is not None or scale is not None:
+            entry = tracker.set_log_amount(con, log_id, grams=grams, scale=scale)
+            if entry is None:
+                raise ValueError(f"no log entry {log_id}")
+        if meal is not None:
+            if tracker.set_log_meal(con, log_id, meal) is None:
+                raise ValueError(f"no log entry {log_id}")
+            entry = tracker._entry(con, log_id)
+        return entry
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def duplicate_log_entry(log_id: int, date: str | None = None,
+                        meal: str | None = None) -> dict:
+    """Log an existing entry again ("I had another one", "same thing for
+    lunch"). The copy keeps the amount and macros of the original. date
+    (YYYY-MM-DD) and meal (breakfast, lunch, dinner, snacks) default to the
+    original's. Returns the new entry."""
+    con = _con()
+    try:
+        copies = tracker.copy_log_entries(
+            con, [log_id], date, tracker.KEEP if meal is None else meal)
+        if not copies:
+            raise ValueError(f"no log entry {log_id}")
+        return copies[0]
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def copy_day(from_date: str, to_date: str | None = None,
+             meals: list[str] | None = None) -> dict:
+    """Copy what was logged on from_date onto to_date (YYYY-MM-DD, default
+    today) — "same breakfast as yesterday", "repeat Monday". Each entry keeps
+    its meal, amount and macros. meals limits the copy, e.g. ["breakfast"];
+    omit it to copy the whole day. Returns {"date", "from_date", "entries":
+    the new entries}; an empty "entries" means nothing was logged there."""
+    con = _con()
+    try:
+        return tracker.copy_day(con, from_date, to_date, meals)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def set_kitchen(food_id: int, in_kitchen: bool = True) -> dict:
+    """Add a food to My Kitchen (things the user keeps on hand) or take it out
+    with in_kitchen=false. Kitchen foods are listed first in the app for
+    one-tap logging. Get food_id from search_food or day_summary."""
+    con = _con()
+    try:
+        food = kitchen.set_kitchen(con, food_id, in_kitchen)
+        if food is None:
+            raise ValueError(f"no food {food_id}")
+        return food
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def list_kitchen() -> list[dict]:
+    """Foods in My Kitchen, most-logged first — use for "what do I have that
+    fits?" alongside remaining. Each is a food (per-100g macros, portions) plus
+    "usual": the amount last logged with its macros, where "usual.item" merged
+    with {"food_id": id} is a ready log_meal item."""
+    con = _con()
+    try:
+        return kitchen.kitchen_list(con)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def save_recipe(name: str, servings: float = 1, items: list[dict] | None = None,
+                log_ids: list[int] | None = None) -> dict:
+    """Save a dish the user makes repeatedly as a recipe: one food, logged by
+    serving. Nothing is logged by this call.
+
+    Ingredients come from either or both of:
+    - items: the same item shapes log_meal takes (lookup {"query", "qty",
+      "unit"} / {"food_id", "grams"}, or manual {"name", "macros"}), with the
+      amounts for the WHOLE recipe.
+    - log_ids: entries already in the log (from day_summary), taken with the
+      amounts they were logged with — "save tonight's dinner as a recipe".
+    servings is how many servings the whole recipe makes.
+
+    Returns {"saved": true, "food_id", "per_serving", "items", ...}. If an item
+    can't be resolved nothing is saved: {"saved": false, "problems": [...]} —
+    fix those items and call again. To log it afterwards:
+    log_meal([{"food_id": food_id, "qty": 1, "unit": "1 serving"}])."""
+    con = _con()
+    try:
+        return kitchen.create_recipe(con, name, servings, items, log_ids)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def list_recipes() -> list[dict]:
+    """The user's saved recipes with servings, per_serving macros and
+    ingredients. Recipes also come up in search_food by name."""
+    con = _con()
+    try:
+        return kitchen.list_recipes(con)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def update_recipe(recipe_id: int, name: str | None = None,
+                  servings: float | None = None,
+                  remove_item_ids: list[int] | None = None,
+                  items: list[dict] | None = None,
+                  log_ids: list[int] | None = None) -> dict:
+    """Change a saved recipe. recipe_id is its food_id (from list_recipes).
+    Any of: name; servings (how many the whole recipe makes); remove_item_ids
+    (ingredient ids from the recipe's "items"); items / log_ids to add
+    ingredients (same shapes as save_recipe). Entries already logged from the
+    recipe keep the macros they were logged with. Returns like save_recipe."""
+    con = _con()
+    try:
+        result = kitchen.update_recipe(con, recipe_id, name, servings,
+                                       remove_item_ids, items, log_ids)
+        if result is None:
+            raise ValueError(f"no recipe {recipe_id}")
+        return result
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def delete_recipe(recipe_id: int) -> dict:
+    """Delete a saved recipe (its food_id). Days it was already logged on keep
+    their entries."""
+    con = _con()
+    try:
+        return {"deleted": kitchen.delete_recipe(con, recipe_id), "recipe_id": recipe_id}
     finally:
         con.close()
 

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
 
-import { addAlias, ApiError, getFood, logMeal, searchFoods } from "@/api"
+import { addAlias, ApiError, getFood, logMeal, searchFoods, setKitchen } from "@/api"
 import { BarcodeFlow } from "@/components/barcode-flow"
+import { QuickPicks } from "@/components/quick-picks"
 import { Checkbox } from "@/components/ui/checkbox"
 import { formatGrams, formatKcal } from "@/lib/format"
 import { MEALS, type Meal } from "@/lib/meals"
-import type { Food, Problem } from "@/types"
+import type { Food, Problem, Recipe, Usual } from "@/types"
 
 const OUNCE = 28.3495
 
@@ -60,7 +61,22 @@ function itemFor(food: Food, choice: Choice, qty: number) {
 function sourceIdent(food: Food): string {
   if (food.store) return food.store
   if (food.brand) return food.brand
+  if (food.source === "recipe") return "Recipe"
   return food.source === "usda" ? "USDA" : food.source
+}
+
+/** Unit + amount to start from: the usual amount when there is one. */
+function startingAmount(food: Food, usual?: Usual) {
+  const options = unitsFor(food)
+  if (usual && "unit" in usual.item) {
+    const id = `portion:${usual.item.unit}`
+    if (options.some((o) => o.id === id)) return { unitId: id, qty: String(usual.item.qty) }
+  }
+  if (usual) return { unitId: "grams", qty: String(usual.grams) }
+  return {
+    unitId: options[0]?.id ?? "grams",
+    qty: options[0]?.choice.kind === "grams" ? "100" : "1",
+  }
 }
 
 /**
@@ -126,6 +142,9 @@ export function Composer({
   onSeedConsumed,
   onLogged,
   onAddFood,
+  stamp,
+  hadFoodIds,
+  onEditRecipe,
 }: {
   date: string
   meal: Meal
@@ -134,6 +153,11 @@ export function Composer({
   onSeedConsumed: () => void
   onLogged: () => void
   onAddFood: (name: string) => void
+  /** Changes whenever the day reloads; the quick lists refetch on it. */
+  stamp: unknown
+  /** Foods already logged at the current meal today. */
+  hadFoodIds: Set<number>
+  onEditRecipe: (recipe: Recipe | number) => void
 }) {
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<Food[]>([])
@@ -147,14 +171,28 @@ export function Composer({
   const [problem, setProblem] = useState<Problem | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  function choose(food: Food) {
-    const options = unitsFor(food)
+  function choose(food: Food, usual?: Usual) {
+    const start = startingAmount(food, usual)
     setSelected(food)
-    setUnitId(options[0]?.id ?? "grams")
-    setQty(options[0]?.choice.kind === "grams" ? "100" : "1")
-    setRemember(canRemember(food, query))
+    setUnitId(start.unitId)
+    setQty(start.qty)
+    // A pick from the quick lists replaces whatever was typed.
+    if (usual) setQuery(food.name)
+    setRemember(usual ? false : canRemember(food, query))
     setProblem(null)
     setNotice(null)
+  }
+
+  async function toggleKitchen() {
+    if (!selected) return
+    const next = !selected.in_kitchen
+    try {
+      const updated = await setKitchen(selected.id, next)
+      setSelected((current) => (current && current.id === updated.id ? { ...current, in_kitchen: updated.in_kitchen } : current))
+      onLogged() // entries and the Kitchen list show the change
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update your kitchen")
+    }
   }
 
   useEffect(() => {
@@ -394,19 +432,32 @@ export function Composer({
                     <span style={{ display: "block", fontSize: 14, fontWeight: 500 }}>{food.name}</span>
                     <span style={{ display: "block", fontSize: 12, color: "var(--me-muted)" }}><FoodSubtitle food={food} /></span>
                   </span>
-                  {food.matched_alias && (
+                  {(food.matched_alias || Boolean(food.in_kitchen)) && (
                     <span style={{
-                      alignSelf: "center", fontSize: 11, fontWeight: 500,
+                      alignSelf: "center", flex: "none", fontSize: 11, fontWeight: 500,
                       color: "var(--me-green-text)", background: "var(--me-green-soft)",
                       padding: "2px 8px", borderRadius: 99,
                     }}>
-                      Saved name
+                      {food.in_kitchen ? "Kitchen" : "Saved name"}
                     </span>
                   )}
                 </button>
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Nothing typed yet: offer the usual foods, the kitchen, and recipes. */}
+        {!selected && query.trim().length < 2 && (
+          <QuickPicks
+            date={date}
+            meal={meal}
+            stamp={stamp}
+            hadFoodIds={hadFoodIds}
+            onChoose={choose}
+            onLogged={onLogged}
+            onEditRecipe={onEditRecipe}
+          />
         )}
 
         {!selected && !searching && query.trim().length >= 2 && results.length === 0 && (
@@ -424,7 +475,7 @@ export function Composer({
 
         {/* Amount / unit / log controls */}
         {selected && choice && (
-          <div style={{
+          <div className="amount-grid" style={{
             marginTop: 14, padding: 14, borderRadius: 10, background: "var(--me-bg)",
             display: "grid",
             gridTemplateColumns: "110px minmax(0, 1fr) auto",
@@ -477,6 +528,7 @@ export function Composer({
             <button
               type="submit"
               disabled={busy}
+              className="amount-log"
               style={{
                 ...btnBase,
                 background: "var(--me-green)", borderColor: "var(--me-green)", color: "var(--me-on-green)",
@@ -492,6 +544,18 @@ export function Composer({
                 {previewText}
               </div>
             )}
+
+            {/* Keep this food handy / open the recipe behind it */}
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 20, flexWrap: "wrap" }}>
+              <button type="button" className="text-btn" aria-pressed={Boolean(selected.in_kitchen)} onClick={() => void toggleKitchen()}>
+                {selected.in_kitchen ? "Remove from kitchen" : "Add to kitchen"}
+              </button>
+              {selected.source === "recipe" && (
+                <button type="button" className="text-btn" onClick={() => onEditRecipe(selected.id)}>
+                  Edit recipe
+                </button>
+              )}
+            </div>
           </div>
         )}
 

@@ -486,11 +486,33 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
                 target_raw[key] += float(goal)
                 under[key] = round(float(goal) - shown[key], 1)
             if in_week and day < today_d:
+                # Option A: skip days that look like incomplete logging.
+                # A day with zero entries was never touched. A day whose kcal
+                # logged is below 50% of the kcal target almost certainly has
+                # a missed meal — same heuristic used by coach.empirical_maintenance
+                # (coach.py:560-562). Crediting phantom deficits on those days
+                # would inflate room_today.
+                kcal_target = targets.get("kcal") if targets else None
+                if raw["entries"] == 0 or (
+                    kcal_target is not None
+                    and raw["kcal"] < 0.5 * float(kcal_target)
+                ):
+                    continue  # treat as incomplete; bank nothing
+
                 saved_days += 1
                 for key in BANK:
                     goal = targets[key]
                     if goal is not None:
-                        saved_raw[key] += float(goal) - raw[key]
+                        raw_delta = float(goal) - raw[key]
+                        # Option C (defense-in-depth): cap each day's credit so
+                        # one day cannot contribute more than 50% of its own
+                        # target (positive = under, negative = over). The cap is
+                        # symmetric: an overrun is also capped to -50% so a
+                        # single binge day can't wipe the whole bank. Choosing
+                        # 50% of the daily target as a natural, target-relative
+                        # bound that scales with the user's plan.
+                        cap = 0.5 * float(goal)
+                        saved_raw[key] += max(-cap, min(cap, raw_delta))
         if day == today_d:
             today_targets = targets
             today_raw = raw

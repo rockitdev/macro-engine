@@ -505,14 +505,12 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
                     if goal is not None:
                         raw_delta = float(goal) - raw[key]
                         # Option C (defense-in-depth): cap each day's credit so
-                        # one day cannot contribute more than 50% of its own
-                        # target (positive = under, negative = over). The cap is
-                        # symmetric: an overrun is also capped to -50% so a
-                        # single binge day can't wipe the whole bank. Choosing
-                        # 50% of the daily target as a natural, target-relative
-                        # bound that scales with the user's plan.
+                        # one under-logged day can't bank more than 50% of its
+                        # own target. One-sided on purpose: overruns are NOT
+                        # capped, so a known overeat is debited in full and
+                        # paid back over the following days (the coaching model).
                         cap = 0.5 * float(goal)
-                        saved_raw[key] += max(-cap, min(cap, raw_delta))
+                        saved_raw[key] += min(cap, raw_delta)
         if day == today_d:
             today_targets = targets
             today_raw = raw

@@ -406,6 +406,16 @@ class MacroEngineTest(unittest.TestCase):
         self.assertEqual(out["saved"]["carb_g"], 100.0)   # capped from 199
         self.assertEqual(out["saved"]["fat_g"], 5.0)      # not capped
 
+    def test_large_overrun_is_not_capped(self):
+        """Option C is credit-only: a big overeat is debited in full for payback."""
+        tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
+        # Monday: +1500 kcal over target (well past the 50% / 1000 kcal cap).
+        self._eat("2026-07-06", kcal=3500, protein_g=150, carb_g=400, fat_g=120)
+        out = tracker.week_summary(self.con, "2026-07-07", today="2026-07-07")
+        self.assertEqual(out["saved"]["kcal"], -1500.0)
+        self.assertEqual(out["saved"]["carb_g"], -200.0)
+        self.assertEqual(out["saved"]["fat_g"], -60.0)
+
     def test_week_monday_has_nothing_saved_yet(self):
         tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
         out = tracker.week_summary(self.con, "2026-07-06", today="2026-07-06")

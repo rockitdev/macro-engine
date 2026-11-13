@@ -364,6 +364,48 @@ class MacroEngineTest(unittest.TestCase):
         self.assertEqual(earlier["room_today"], out["room_today"])
         self.assertEqual(earlier["focus"], "2026-07-08")
 
+    # --- Option A + C bank-gate tests ---
+
+    def test_fully_unlogged_day_banks_zero(self):
+        """Option A: a past day with zero log entries does not feed the bank."""
+        # Set up a week where Mon-Wed have targets but only Wed gets an entry.
+        tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
+        # Only log Wednesday — Monday and Tuesday are completely unlogged.
+        self._eat("2026-07-08", kcal=1500, protein_g=100, carb_g=150, fat_g=45)
+        out = tracker.week_summary(self.con, "2026-07-09", today="2026-07-09")
+        # Only Wednesday passes Option A (entries > 0, kcal 75% of target).
+        # Monday and Tuesday contribute nothing.
+        self.assertEqual(out["saved"]["kcal"], 500.0)
+        self.assertEqual(out["saved"]["carb_g"], 50.0)
+        self.assertEqual(out["saved"]["fat_g"], 15.0)
+
+    def test_sub_50_percent_kcal_day_banks_zero(self):
+        """Option A: a day below 50% of kcal target is treated as incomplete."""
+        tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
+        # Monday: 40% of target — should be excluded.
+        self._eat("2026-07-06", kcal=800, protein_g=60, carb_g=120, fat_g=30)
+        # Tuesday: 75% of target — should be included.
+        self._eat("2026-07-07", kcal=1500, protein_g=100, carb_g=150, fat_g=45)
+        out = tracker.week_summary(self.con, "2026-07-08", today="2026-07-08")
+        # Only Tuesday's deficit is banked.
+        self.assertEqual(out["saved"]["kcal"], 500.0)
+        self.assertEqual(out["saved"]["carb_g"], 50.0)
+        self.assertEqual(out["saved"]["fat_g"], 15.0)
+
+    def test_large_deficit_capped_by_option_c(self):
+        """Option C: a complete day's bank credit is capped at 50% of that day's target."""
+        # Target: kcal=2000, carb_g=200, fat_g=60.
+        tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
+        # Log Monday: passes Option A (kcal 75%), but logs almost no carbs.
+        # carb_delta = 200 - 1 = 199 g; cap = 0.5 * 200 = 100 g → credited as 100.
+        # kcal_delta = 500; cap = 0.5 * 2000 = 1000 → not capped, credited as 500.
+        # fat_delta  = 60 - 55 = 5; cap = 0.5 * 60 = 30 → not capped, credited as 5.
+        self._eat("2026-07-06", kcal=1500, protein_g=100, carb_g=1, fat_g=55)
+        out = tracker.week_summary(self.con, "2026-07-07", today="2026-07-07")
+        self.assertEqual(out["saved"]["kcal"], 500.0)
+        self.assertEqual(out["saved"]["carb_g"], 100.0)   # capped from 199
+        self.assertEqual(out["saved"]["fat_g"], 5.0)      # not capped
+
     def test_week_monday_has_nothing_saved_yet(self):
         tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
         out = tracker.week_summary(self.con, "2026-07-06", today="2026-07-06")
@@ -400,9 +442,12 @@ class MacroEngineTest(unittest.TestCase):
         out = tracker.week_summary(self.con, "2026-07-10", today="2026-07-10")
         self.assertIsNone(out["days"][0]["targets"])
         self.assertIsNone(out["days"][0]["under"])
-        # Wednesday and Thursday are the only finished days with a target.
-        self.assertEqual(out["saved"]["carb_g"], 400.0)
-        self.assertEqual(out["room_today"]["carb_g"], 600.0)
+        # Wednesday and Thursday have targets but zero entries — Option A treats them
+        # as incomplete-logging days and banks nothing from them. saved is None.
+        self.assertIsNone(out["saved"])
+        # room_today is just today's daily allowance (no bank to draw from).
+        self.assertEqual(out["room_today"]["carb_g"], 200.0)
+        # Week-level totals are unaffected by the bank-gate fix.
         self.assertEqual(out["week"]["eaten"]["carb_g"], 50.0)
         self.assertEqual(out["week"]["target"]["carb_g"], 1000.0)
         self.assertEqual(out["week"]["left"]["carb_g"], 950.0)
@@ -437,7 +482,9 @@ class MacroEngineTest(unittest.TestCase):
     def test_week_bank_rounds_once(self):
         tracker.set_targets(self.con, 100, 10, 20, 10, effective_date="2026-07-06")
         for day in ("2026-07-06", "2026-07-07", "2026-07-08"):
-            self._eat(day, carb_g=10.14)
+            # Include kcal so the day passes the Option A completeness gate
+            # (kcal=70 > 50% of target 100).
+            self._eat(day, kcal=70, carb_g=10.14)
         out = tracker.week_summary(self.con, "2026-07-09", today="2026-07-09")
         # 3 * (20 - 10.14) = 29.58, rounded once. Each day still shows 10.1 g.
         self.assertEqual(out["saved"]["carb_g"], 29.6)
@@ -460,8 +507,9 @@ class MacroEngineTest(unittest.TestCase):
         self.assertEqual(out["end"], "2026-07-11")
         self.assertEqual(out["days"][0]["date"], "2026-07-05")
         self.assertEqual(out["days"][-1]["date"], "2026-07-11")
-        # Sunday's 50 g under, plus Monday through Friday untouched.
-        self.assertEqual(out["saved"]["carb_g"], 1050.0)
+        # Sunday's 50 g under. Monday through Friday have no entries so Option A
+        # skips them (incomplete-logging gate) — only Sunday contributes to the bank.
+        self.assertEqual(out["saved"]["carb_g"], 50.0)
         self.assertEqual(tracker.get_week_start(self.con), "sunday")
 
     def test_week_can_start_on_wednesday(self):

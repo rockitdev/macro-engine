@@ -41,6 +41,13 @@ export function getDay(date: string) {
   return request<Day>(`/api/day?date=${encodeURIComponent(date)}`)
 }
 
+export function setDayComplete(date: string, complete: boolean) {
+  return request<{ date: string; complete: boolean }>("/api/day/complete", {
+    method: "POST",
+    body: JSON.stringify({ date, complete }),
+  })
+}
+
 export function getWeek(date: string) {
   return request<Week>(`/api/week?date=${encodeURIComponent(date)}`)
 }
@@ -168,7 +175,7 @@ export function setKitchen(foodId: number, inKitchen: boolean) {
 }
 
 export function getRecipes(signal?: AbortSignal) {
-  return request<{ recipes: Recipe[] }>("/api/recipes", { signal })
+  return request<{ recipes: Recipe[]; cookbooks_available?: boolean }>("/api/recipes", { signal })
 }
 
 export function getRecipe(id: number) {
@@ -314,4 +321,29 @@ export function updateWorkout(id: number, body: Partial<ManualWorkout>) {
 
 export function deleteWorkout(id: number) {
   return request<{ deleted: boolean }>(`/api/workouts/${id}`, { method: "DELETE" })
+}
+
+type PlannerMacros = { kcal: number; protein_g: number; carb_g: number; fat_g: number; fiber_g: number | null }
+export type MealChoice = {
+  id: string; title: string; book: string; minutes: number | null; ready: number; kitchen_matches: string[]
+  macros: PlannerMacros; portion: PlannerMacros; after: Partial<PlannerMacros>
+}
+export type CookbookPlan = {
+  id: number; recipe_id: string; title: string; date: string; meal: string; servings: number; macros: PlannerMacros
+}
+export type MealBoard = {
+  choices: MealChoice[]; count: number; meal_kcal: number | null; slots: number
+  plans: CookbookPlan[]; prep_list: { id: string; title: string; needed: number }[]; prepared: { id: string; title: string; servings: number }[]
+}
+export function getMealBoard(params: URLSearchParams, signal: AbortSignal) {
+  return request<MealBoard>(`/api/meal-planner?${params}`, { signal })
+}
+export type CookbookAction = {
+  action: "eat" | "prep" | "plan" | "discard" | "remove_plan"; recipe_id?: string
+  date?: string; meal?: string; servings?: number; plan_id?: number; use_prepared?: boolean; days?: number
+}
+export function actOnMeal(body: CookbookAction, request_id: string) {
+  return request<{ action: string }>("/api/meal-planner", {
+    method: "POST", body: JSON.stringify({ ...body, request_id }),
+  })
 }

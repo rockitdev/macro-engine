@@ -93,6 +93,7 @@ export function QuickPicks({
   const [tab, setTab] = useState<Tab>(savedTab)
   const [rows, setRows] = useState<Row[] | null>(null)
   const [shownFor, setShownFor] = useState<string | null>(null)
+  const [cookbooksAvailable, setCookbooksAvailable] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -106,7 +107,10 @@ export function QuickPicks({
     const load =
       tab === "usual" ? getUsuals(meal, date, controller.signal).then((r) => r.usual.map(pickRow))
       : tab === "kitchen" ? getKitchen(date, controller.signal).then((r) => r.foods.map(pickRow))
-      : getRecipes(controller.signal).then((r) => r.recipes.map(recipeRow))
+      : getRecipes(controller.signal).then((r) => {
+          if (!controller.signal.aborted) setCookbooksAvailable(!!r.cookbooks_available)
+          return r.recipes.map(recipeRow)
+        })
     load
       .then((next) => {
         setRows(next)
@@ -177,11 +181,17 @@ export function QuickPicks({
         ))}
       </div>
 
+      {tab === "recipes" && cookbooksAvailable && (
+        <a className="text-btn" style={{ display: "inline-block", marginTop: 12 }} href="/api/cookbooks/index.html">
+          Browse cookbooks
+        </a>
+      )}
+
       {error && (
         <p style={{ margin: 0, padding: "12px 0 0", fontSize: 14, color: "var(--me-roast)" }} role="alert">{error}</p>
       )}
 
-      {current && current.length === 0 && !error && <Empty tab={tab} meal={meal} />}
+      {current && current.length === 0 && !error && !(tab === "recipes" && cookbooksAvailable) && <Empty tab={tab} meal={meal} />}
 
       {current === null && !error && (
         <p style={{ margin: 0, padding: "14px 0 4px", fontSize: 14, color: "var(--me-faint)" }}>Loading…</p>

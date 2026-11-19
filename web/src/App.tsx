@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { ApiError, deleteLogs, duplicateLog, duplicateLogs, getDay, getFood, getMonth, getRecipe, getWeek, moveLogs, restoreLogs, setKitchen, setLogAmount, setLogMeal, setWeekStart } from "@/api"
+import { ApiError, setDayComplete, deleteLogs, duplicateLog, duplicateLogs, getDay, getFood, getMonth, getRecipe, getWeek, moveLogs, restoreLogs, setKitchen, setLogAmount, setLogMeal, setWeekStart } from "@/api"
 import type { AmountChange } from "@/components/amount-sheet"
 import { CopyDaySheet } from "@/components/copy-day-sheet"
 import { DayView } from "@/components/day-view"
@@ -223,6 +223,15 @@ export default function App() {
   function openDay(next: string) {
     setMode("day")
     setDate(next)
+  }
+
+  async function markDayComplete(dayDate: string, complete: boolean) {
+    try {
+      await setDayComplete(dayDate, complete)
+      await load(date, mode)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update this day")
+    }
   }
 
   async function saveWeekStart(dayName: string) {
@@ -528,6 +537,7 @@ export default function App() {
             listKey={listKey}
             onWeekStart={saveWeekStart}
             onSelectDay={openDay}
+            onDayComplete={markDayComplete}
           />
         )}
 

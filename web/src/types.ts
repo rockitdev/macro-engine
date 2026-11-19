@@ -69,6 +69,8 @@ export type Day = {
     fiber_g: number | null
   } | null
   note?: string
+  /** Marked fully logged; only complete days feed the week bank. */
+  complete: boolean
 }
 
 export type Candidate = {
@@ -106,6 +108,7 @@ export type WeekDay = {
     fat_g: number | null
     fiber_g: number | null
   } | null
+  complete: boolean
 }
 
 export type Week = {
@@ -117,6 +120,8 @@ export type Week = {
   days: WeekDay[]
   saved: Bank | null
   room_today: Bank | null
+  /** Earlier days this week with a target that aren't marked complete. */
+  open_days: string[]
   week: {
     target: {
       kcal: number | null

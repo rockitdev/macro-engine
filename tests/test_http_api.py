@@ -345,6 +345,26 @@ class HttpApiTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", bad)
 
+    def test_day_complete_route(self):
+        _, day, _ = self.req("GET", "/api/day?date=2026-07-06")
+        self.assertFalse(day["complete"])
+        status, body, _ = self.req("POST", "/api/day/complete",
+                                   {"date": "2026-07-06", "complete": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"date": "2026-07-06", "complete": True})
+        _, day, _ = self.req("GET", "/api/day?date=2026-07-06")
+        self.assertTrue(day["complete"])
+        status, body, _ = self.req("POST", "/api/day/complete",
+                                   {"date": "2026-07-06", "complete": False})
+        self.assertEqual(body["complete"], False)
+        status, bad, _ = self.req("POST", "/api/day/complete",
+                                  {"date": "2026-07-06", "complete": "yes"})
+        self.assertEqual(status, 400)
+        status, bad, _ = self.req("POST", "/api/day/complete",
+                                  {"date": "2999-01-01", "complete": True})
+        self.assertEqual(status, 400)
+        self.assertIn("future", bad["error"])
+
     def test_bad_date_and_bad_json(self):
         status, body, _ = self.req("GET", "/api/day?date=tomorrow")
         self.assertEqual(status, 400)

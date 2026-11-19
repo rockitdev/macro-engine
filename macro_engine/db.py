@@ -108,6 +108,23 @@ CREATE INDEX IF NOT EXISTS idx_log_trash_id ON log_trash(id);
 -- food row carries the per-100 g macros and a "1 serving" portion, so recipes
 -- log like any other food. archived = deleted by the user but kept because
 -- log history still points at the food.
+CREATE TABLE IF NOT EXISTS cookbook_entries (
+    id TEXT PRIMARY KEY, book TEXT NOT NULL, title TEXT NOT NULL,
+    page TEXT NOT NULL, record_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meal_plans (
+    id INTEGER PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES cookbook_entries(id),
+    date TEXT NOT NULL, meal TEXT NOT NULL, servings REAL NOT NULL CHECK(servings > 0)
+);
+CREATE INDEX IF NOT EXISTS meal_plans_date ON meal_plans(date);
+CREATE TABLE IF NOT EXISTS prepared_meals (
+    recipe_id TEXT PRIMARY KEY REFERENCES cookbook_entries(id),
+    servings REAL NOT NULL CHECK(servings >= 0)
+);
+CREATE TABLE IF NOT EXISTS meal_action_receipts (
+    request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, result TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS recipes (
     food_id    INTEGER PRIMARY KEY REFERENCES foods(id) ON DELETE CASCADE,
     servings   REAL NOT NULL,
@@ -266,6 +283,14 @@ CREATE TABLE IF NOT EXISTS checkins (
     created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(date);
+
+-- Days the user has marked as fully logged. A row means complete; reopening
+-- deletes it. Only complete days feed the week bank, so a forgotten meal can
+-- never pass for a real deficit. Log rows are never touched.
+CREATE TABLE IF NOT EXISTS closed_days (
+    date       TEXT PRIMARY KEY,
+    closed_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

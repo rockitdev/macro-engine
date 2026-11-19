@@ -8,7 +8,10 @@ or via .mcp.json (see README).
 
 from mcp.server.fastmcp import FastMCP
 
-from macro_engine import coach, db, fit_meal as _fit_meal_mod, kitchen, resolve, tracker
+import json
+from contextlib import closing
+
+from macro_engine import meal_planner, coach, db, fit_meal as _fit_meal_mod, kitchen, resolve, tracker
 
 mcp = FastMCP(
     "macro-engine",
@@ -30,6 +33,8 @@ mcp = FastMCP(
         "log. One-time setup, zero-friction forever. Foods the user keeps on "
         "hand go in My Kitchen (set_kitchen); a dish they make repeatedly is a "
         "recipe (save_recipe), logged by serving like any other food.\n\n"
+        "For what to eat next, use suggest_next_meal. Planning and preparation use cookbook_meal_action. "
+        "Only record consumption when the user says they ate it.\n\n"
         "Coaching (evidence-based, from Fat Loss Forever): the user weighs in "
         "daily -> log_weight. Judge progress only by weekly averages, never a "
         "single weigh-in (1-2% daily swings are water; up to 4% premenstrually). "
@@ -108,7 +113,9 @@ def day_summary(date: str | None = None) -> dict:
     'what have I eaten today' and before correcting entries."""
     con = _con()
     try:
-        return {"entries": tracker.day_log(con, date), **tracker.remaining(con, date)}
+        out = {"entries": tracker.day_log(con, date), **tracker.remaining(con, date)}
+        out["complete"] = tracker.is_day_complete(con, out["date"])
+        return out
     finally:
         con.close()
 
@@ -118,11 +125,41 @@ def week_summary(date: str | None = None) -> dict:
     """The seven-day week containing date (YYYY-MM-DD, default today), starting
     on the user's week_starts_on day. 'saved' is kcal/carb/fat left unused on
     earlier days this week (negative = over); 'room_today' is today's remaining
-    plus that bank. Protein and fiber are weekly totals, not banked. Use for
-    'how's my week going' and 'can I afford a bigger dinner tonight'."""
+    plus that bank. Only days marked complete (close_day) are banked;
+    'open_days' lists earlier days that aren't, and they count for nothing
+    until closed. If open_days is non-empty, ask whether those days are fully
+    logged before relying on room_today. Protein and fiber are weekly totals,
+    not banked. Use for 'how's my week going' and 'can I afford a bigger
+    dinner tonight'."""
     con = _con()
     try:
         return tracker.week_summary(con, date)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def close_day(date: str | None = None) -> dict:
+    """Mark a day (YYYY-MM-DD, default today) as fully logged. Only closed days
+    feed the week bank. Offer it when the user says they're done eating for
+    the day, or the next morning for a day still in week_summary's open_days.
+    Never close a day on your own assumption; a forgotten meal on a closed day
+    becomes a fake deficit. Returns {date, complete}."""
+    con = _con()
+    try:
+        return tracker.set_day_complete(con, date, True)
+    finally:
+        con.close()
+
+
+@mcp.tool()
+def reopen_day(date: str) -> dict:
+    """Undo close_day for a date (YYYY-MM-DD), e.g. when the user remembers a
+    meal they didn't log. The day stops feeding the week bank until closed
+    again. Returns {date, complete}."""
+    con = _con()
+    try:
+        return tracker.set_day_complete(con, date, False)
     finally:
         con.close()
 
@@ -623,5 +660,49 @@ def plan_high_days(high_days: int = 2, high_kcal: float | None = None,
         con.close()
 
 
+@mcp.tool()
+def suggest_next_meal(date: str | None = None, meal: str = "dinner", mode: str = "cook",
+                      query: str = "", offset: int = 0, minutes: int | None = None,
+                      servings: float = 1) -> dict:
+    """Choose a cookbook portion using personal targets, logged food and already-planned meals.
+    mode='ready' uses prepared inventory. minutes filters known ready-in times. query searches
+    recipe text. Returns ranked choices with per-portion macros, projected remaining budget,
+    prepared servings and the next seven days of plans. offset advances through alternatives."""
+    with closing(_con()) as con:
+        return meal_planner.next_meal(con, date, meal, mode, query, offset, minutes, servings)
+
+
+@mcp.tool()
+def get_cookbook_recipe(recipe_id: str) -> dict:
+    """Read the imported recipe text, published portion values and source page for a suggested meal."""
+    with closing(_con()) as con:
+        row = con.execute("SELECT record_json FROM cookbook_entries WHERE id=?", (recipe_id,)).fetchone()
+        if not row:
+            raise ValueError("Unknown cookbook recipe.")
+        recipe = json.loads(row[0])
+        return {key: recipe[key] for key in ("id", "title", "book", "page", "macros", "layout")}
+
+
+@mcp.tool()
+def cookbook_meal_action(action: str, request_id: str, recipe_id: str | None = None,
+                         servings: float = 1, date: str | None = None, meal: str = "dinner",
+                         plan_id: int | None = None, use_prepared: bool = False, days: int = 1) -> dict:
+    """Use a recipe ID from suggest_next_meal. plan schedules a portion, prep adds cooked servings,
+    days repeats a plan on 1–7 consecutive dates. discard removes prepared servings. eat records actual consumption, optionally from prepared stock.
+    Pass plan_id to eat or remove_plan for a scheduled meal. Use quarter-serving increments.
+    Generate a unique request_id per decision and reuse it on retry. Only eat writes the food log."""
+    with closing(_con()) as con:
+        return meal_planner.meal_action(con, action, request_id, recipe_id, servings, date, meal,
+                                        plan_id, use_prepared, days)
+
+
 if __name__ == "__main__":
-    mcp.run()
+    import sys
+    if sys.argv[1:] == ["--meals-only"]:
+        meals = FastMCP("macro-meals", instructions="Use suggestions for meal decisions. Log only confirmed consumption.")
+        meals.tool()(suggest_next_meal)
+        meals.tool()(get_cookbook_recipe)
+        meals.tool()(cookbook_meal_action)
+        meals.run()
+    else:
+        mcp.run()

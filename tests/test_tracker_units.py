@@ -441,6 +441,7 @@ class TestWeekSummaryPartialTarget(unittest.TestCase):
                 "INSERT INTO log (date, qty_desc, kcal, protein_g, carb_g, fat_g) "
                 "VALUES (?, 't', 1500, 100, 150, 40)", (day,)
             )
+            self.con.execute("INSERT INTO closed_days (date) VALUES (?)", (day,))
         self.con.commit()
 
         # Patch get_targets so any call returns our partial target (no DB write needed)
@@ -477,6 +478,7 @@ class TestWeekSummaryPartialTarget(unittest.TestCase):
                 "INSERT INTO log (date, qty_desc, kcal, protein_g, carb_g, fat_g) "
                 "VALUES (?, 't', 1500, 100, 150, 40)", (day,)
             )
+            self.con.execute("INSERT INTO closed_days (date) VALUES (?)", (day,))
         self.con.commit()
         out = tracker.week_summary(self.con, "2026-07-08", today="2026-07-08")
         self.assertIsNotNone(out["saved"])

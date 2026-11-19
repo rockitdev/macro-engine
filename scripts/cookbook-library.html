@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cookbooks · Macro Engine</title>
+<style>
+*{box-sizing:border-box} body{margin:0;background:#faf8f4;color:#24342d;font:16px/1.5 system-ui,sans-serif}
+main{max-width:960px;margin:auto;padding:24px 16px 64px}h1{font:600 clamp(28px,5vw,40px)/1.2 Georgia,serif;margin:.5em 0}
+.controls{display:flex;gap:10px;flex-wrap:wrap}input,select,button{font:inherit;color:inherit}input,select{background:white;border:1px solid #a6b2a9;border-radius:8px;padding:10px;max-width:100%}input{flex:1;min-width:14em}
+ul{padding:0;list-style:none}li{border-top:1px solid #d4dcd5}a{color:#275b43}li a{display:block;padding:12px 4px;text-decoration:none}li a:hover strong{text-decoration:underline}small{display:block;color:#535e55}img{width:100%;height:auto;display:block;margin:12px auto;background:white}pre{overflow:auto;background:white;padding:1em;line-height:1.5}button{background:none;border:0;padding:8px 0;text-decoration:underline;cursor:pointer}
+</style>
+<main>
+<section id="browse"><h1>Cookbooks</h1>
+<div class="controls"><input id="search" type="search" aria-label="Search recipes and ingredients" placeholder="Search recipes or ingredients"><select id="book" aria-label="Filter by cookbook"><option value="">All cookbooks</option></select></div>
+<p id="count" role="status"></p><ul id="list"></ul></section>
+<section id="detail" hidden><a href="#">← Cookbooks</a><h1 id="title" tabindex="-1"></h1><p id="source"></p><p><a id="decide" hidden>Choose this meal in Macro Engine</a></p><div id="pages"></div><details><summary>Recipe text</summary><pre id="transcript"></pre></details></section>
+</main>
+<script>
+const recipes = /*COOKBOOK_DATA*/[];
+const $ = id => document.getElementById(id);
+const normalize = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+for (const book of new Set(recipes.map(r => r.book))) $("book").add(new Option(book,book));
+const sorted = [...recipes].sort((a,b) => a.title.localeCompare(b.title));
+function browse() {
+  const words = normalize($("search").value).trim().split(/\s+/);
+  const matches = sorted.filter(r => (!$("book").value || r.book === $("book").value) &&
+      words.every(w => normalize(r.title+" "+r.layout).includes(w)));
+  $("count").textContent = matches.length + (matches.length === 1 ? " recipe" : " recipes");
+  $("list").replaceChildren(...matches.map(r => {
+    const li = document.createElement("li"), a = document.createElement("a");
+    a.href = "#" + r.id;
+    const name = document.createElement("strong"), sub = document.createElement("small");
+    name.textContent = r.title;
+    const m = r.macros;
+    sub.textContent = r.book + " · p. " + r.page + (m.calories ?
+      " · "+m.calories+" kcal · "+m.protein+" g protein · "+m.carbs+" g carbs · "+m.fat+" g fat per serving" : "");
+    a.append(name,sub); li.append(a); return li;
+  }));
+}
+function route() {
+  const r = recipes.find(r => "#"+r.id === location.hash);
+  $("browse").hidden = !!r; $("detail").hidden = !r;
+  document.title = (r ? r.title : "Cookbooks") + " · Macro Engine";
+  if (!r) return;
+  $("title").textContent = r.title; $("source").textContent = r.book + " · p. " + r.page;
+  $("decide").hidden = !r.macros.calories || location.protocol === "file:";
+  $("decide").href = "/?cookbook=" + encodeURIComponent(r.id);
+  $("pages").replaceChildren(...r.pictures.map((file,i) => {
+    const img = new Image(); img.src = file;
+    img.alt = r.title + (i ? ", continued" : ", full recipe and published nutrition");
+    return img;
+  }));
+  $("transcript").textContent = r.layout;
+  $("transcript").parentElement.open = false;
+  $("title").focus(); window.scrollTo(0,0);
+}
+$("search").oninput=browse; $("book").onchange=browse; window.onhashchange=route;
+browse(); route();
+</script>
+</html>

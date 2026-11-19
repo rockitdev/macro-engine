@@ -324,12 +324,16 @@ class MacroEngineTest(unittest.TestCase):
 
     # --- week_summary, month_summary, get/set_week_start, set_log_meal ---
 
-    def _eat(self, date, kcal=0, protein_g=0, carb_g=0, fat_g=0, fiber_g=0):
+    def _eat(self, date, kcal=0, protein_g=0, carb_g=0, fat_g=0, fiber_g=0, close=True):
+        """Log food for a day. By default the day is also marked complete, so
+        bank-math tests see it banked; pass close=False for an open day."""
         self.con.execute(
             """INSERT INTO log (date, qty_desc, kcal, protein_g, carb_g, fat_g, fiber_g)
                VALUES (?, 'test', ?, ?, ?, ?, ?)""",
             (date, kcal, protein_g, carb_g, fat_g, fiber_g),
         )
+        if close:
+            self.con.execute("INSERT OR IGNORE INTO closed_days (date) VALUES (?)", (date,))
         self.con.commit()
 
     def test_week_banks_unused_carbs_and_fat_for_saturday(self):
@@ -364,33 +368,57 @@ class MacroEngineTest(unittest.TestCase):
         self.assertEqual(earlier["room_today"], out["room_today"])
         self.assertEqual(earlier["focus"], "2026-07-08")
 
-    # --- Option A + C bank-gate tests ---
+    # --- Closed-day bank gate (Option B) + credit cap (Option C) ---
 
-    def test_fully_unlogged_day_banks_zero(self):
-        """Option A: a past day with zero log entries does not feed the bank."""
-        # Set up a week where Mon-Wed have targets but only Wed gets an entry.
+    def test_unlogged_open_days_bank_nothing(self):
+        """A past day with no entries and no close is open: no credit."""
         tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
-        # Only log Wednesday — Monday and Tuesday are completely unlogged.
         self._eat("2026-07-08", kcal=1500, protein_g=100, carb_g=150, fat_g=45)
         out = tracker.week_summary(self.con, "2026-07-09", today="2026-07-09")
-        # Only Wednesday passes Option A (entries > 0, kcal 75% of target).
-        # Monday and Tuesday contribute nothing.
         self.assertEqual(out["saved"]["kcal"], 500.0)
         self.assertEqual(out["saved"]["carb_g"], 50.0)
         self.assertEqual(out["saved"]["fat_g"], 15.0)
+        self.assertEqual(out["open_days"], ["2026-07-06", "2026-07-07"])
+        # Open days are still listed in the week (regression: #23 dropped them).
+        self.assertEqual(len(out["days"]), 7)
+        self.assertEqual([d["complete"] for d in out["days"][:3]], [False, False, True])
 
-    def test_sub_50_percent_kcal_day_banks_zero(self):
-        """Option A: a day below 50% of kcal target is treated as incomplete."""
+    def test_forgotten_dinner_on_open_day_banks_nothing(self):
+        """The reported bug: breakfast + lunch logged (~65%), dinner forgotten."""
         tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
-        # Monday: 40% of target — should be excluded.
+        self._eat("2026-07-06", kcal=1300, protein_g=100, carb_g=130, fat_g=40, close=False)
+        out = tracker.week_summary(self.con, "2026-07-07", today="2026-07-07")
+        self.assertIsNone(out["saved"])
+        self.assertEqual(out["room_today"], {"kcal": 2000.0, "carb_g": 200.0, "fat_g": 60.0})
+        self.assertEqual(out["open_days"], ["2026-07-06"])
+        # Closing it makes it bank normally.
+        tracker.set_day_complete(self.con, "2026-07-06", today="2026-07-07")
+        out = tracker.week_summary(self.con, "2026-07-07", today="2026-07-07")
+        self.assertEqual(out["saved"]["kcal"], 700.0)
+        self.assertEqual(out["open_days"], [])
+
+    def test_closed_light_day_banks_with_cap(self):
+        """A closed day is trusted even when light, but credit caps at 50%."""
+        tracker.set_targets(self.con, 2000, 150, 200, 60, effective_date="2026-07-06")
         self._eat("2026-07-06", kcal=800, protein_g=60, carb_g=120, fat_g=30)
-        # Tuesday: 75% of target — should be included.
-        self._eat("2026-07-07", kcal=1500, protein_g=100, carb_g=150, fat_g=45)
-        out = tracker.week_summary(self.con, "2026-07-08", today="2026-07-08")
-        # Only Tuesday's deficit is banked.
-        self.assertEqual(out["saved"]["kcal"], 500.0)
-        self.assertEqual(out["saved"]["carb_g"], 50.0)
-        self.assertEqual(out["saved"]["fat_g"], 15.0)
+        out = tracker.week_summary(self.con, "2026-07-07", today="2026-07-07")
+        self.assertEqual(out["saved"]["kcal"], 1000.0)   # capped from 1200
+        self.assertEqual(out["saved"]["carb_g"], 80.0)
+        self.assertEqual(out["saved"]["fat_g"], 30.0)
+
+    def test_set_day_complete_close_reopen_and_future(self):
+        out = tracker.set_day_complete(self.con, "2026-07-06", today="2026-07-07")
+        self.assertEqual(out, {"date": "2026-07-06", "complete": True})
+        # Idempotent.
+        tracker.set_day_complete(self.con, "2026-07-06", today="2026-07-07")
+        self.assertTrue(tracker.is_day_complete(self.con, "2026-07-06"))
+        out = tracker.set_day_complete(self.con, "2026-07-06", False, today="2026-07-07")
+        self.assertEqual(out, {"date": "2026-07-06", "complete": False})
+        self.assertFalse(tracker.is_day_complete(self.con, "2026-07-06"))
+        with self.assertRaises(ValueError):
+            tracker.set_day_complete(self.con, "2026-07-08", today="2026-07-07")
+        with self.assertRaises(ValueError):
+            tracker.set_day_complete(self.con, "someday", today="2026-07-07")
 
     def test_large_deficit_capped_by_option_c(self):
         """Option C: a complete day's bank credit is capped at 50% of that day's target."""
@@ -452,9 +480,10 @@ class MacroEngineTest(unittest.TestCase):
         out = tracker.week_summary(self.con, "2026-07-10", today="2026-07-10")
         self.assertIsNone(out["days"][0]["targets"])
         self.assertIsNone(out["days"][0]["under"])
-        # Wednesday and Thursday have targets but zero entries — Option A treats them
-        # as incomplete-logging days and banks nothing from them. saved is None.
+        # Wednesday and Thursday have targets but were never closed, so they
+        # bank nothing and show up as open. saved is None.
         self.assertIsNone(out["saved"])
+        self.assertEqual(out["open_days"], ["2026-07-08", "2026-07-09"])
         # room_today is just today's daily allowance (no bank to draw from).
         self.assertEqual(out["room_today"]["carb_g"], 200.0)
         # Week-level totals are unaffected by the bank-gate fix.
@@ -492,8 +521,6 @@ class MacroEngineTest(unittest.TestCase):
     def test_week_bank_rounds_once(self):
         tracker.set_targets(self.con, 100, 10, 20, 10, effective_date="2026-07-06")
         for day in ("2026-07-06", "2026-07-07", "2026-07-08"):
-            # Include kcal so the day passes the Option A completeness gate
-            # (kcal=70 > 50% of target 100).
             self._eat(day, kcal=70, carb_g=10.14)
         out = tracker.week_summary(self.con, "2026-07-09", today="2026-07-09")
         # 3 * (20 - 10.14) = 29.58, rounded once. Each day still shows 10.1 g.
@@ -517,8 +544,8 @@ class MacroEngineTest(unittest.TestCase):
         self.assertEqual(out["end"], "2026-07-11")
         self.assertEqual(out["days"][0]["date"], "2026-07-05")
         self.assertEqual(out["days"][-1]["date"], "2026-07-11")
-        # Sunday's 50 g under. Monday through Friday have no entries so Option A
-        # skips them (incomplete-logging gate) — only Sunday contributes to the bank.
+        # Sunday's 50 g under. Monday through Friday were never closed, so only
+        # Sunday contributes to the bank.
         self.assertEqual(out["saved"]["carb_g"], 50.0)
         self.assertEqual(tracker.get_week_start(self.con), "sunday")
 

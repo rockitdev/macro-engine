@@ -13,12 +13,14 @@ import argparse
 import hmac
 import json
 import os
+import re
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import activity, barcode as _barcode_mod, coach, db, fit_meal as _fit_meal_mod, health_import, kitchen, resolve, tracker
+from . import meal_planner
 from .fit_meal import set_meals_per_day as _set_meals_per_day, get_meals_per_day as _get_meals_per_day
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +35,7 @@ MIME = {
     ".json": "application/json",
     ".map": "application/json",
     ".png": "image/png",
+    ".jpg": "image/jpeg",
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
     ".txt": "text/plain; charset=utf-8",
@@ -59,7 +62,8 @@ def _day(con, date: str | None) -> dict:
     entries = tracker.day_log(con, summary["date"])
     for entry in entries:
         entry["estimated"] = bool(entry["estimated"])
-    return {"entries": entries, **summary}
+    return {"entries": entries, **summary,
+            "complete": tracker.is_day_complete(con, summary["date"])}
 
 
 class ApiError(Exception):
@@ -153,6 +157,21 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         _send_empty(handler, 204)
         return
 
+    if path == "/api/meal-planner" and method == "GET":
+        params = {key: qs[key][0] for key in ("date", "meal", "mode", "query", "offset", "minutes", "servings") if key in qs}
+        with _connect() as con:
+            _send_json(handler, 200, meal_planner.next_meal(con, **params))
+        return
+
+    if path == "/api/meal-planner" and method == "POST":
+        body = _read_body(handler)
+        _missing(body, "action", "request_id")
+        params = {key: body[key] for key in ("action", "request_id", "recipe_id", "plan_id", "date",
+                                              "meal", "servings", "use_prepared", "days") if key in body}
+        with _connect() as con:
+            _send_json(handler, 200, meal_planner.meal_action(con, **params))
+        return
+
     if method == "GET" and path == "/api/health":
         _send_json(handler, 200, {"ok": True})
         return
@@ -213,6 +232,16 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
     if method == "GET" and path == "/api/day":
         with _connect() as con:
             _send_json(handler, 200, _day(con, _query_date(qs)))
+        return
+
+    if method == "POST" and path == "/api/day/complete":
+        body = _read_body(handler)
+        complete = body.get("complete", True)
+        if not isinstance(complete, bool):
+            raise ValueError("complete must be true or false")
+        with _connect() as con:
+            _send_json(handler, 200, tracker.set_day_complete(
+                con, body.get("date"), complete))
         return
 
     if method == "GET" and path == "/api/week":
@@ -370,9 +399,22 @@ def handle_request(handler: BaseHTTPRequestHandler, method: str) -> None:
         _send_json(handler, 200, food)
         return
 
+    if method == "GET" and len(parts) == 3 and parts[:2] == ["api", "cookbooks"]:
+        name = parts[2]
+        if name != "index.html" and not re.fullmatch(r"(?:kory|greg2?)-[a-f0-9]{12}(?:-[0-9]+){5}\.jpg", name):
+            raise ApiError(404, "unknown cookbook page")
+        file = db.default_db_path().parent / "cookbooks" / name
+        if not file.is_file():
+            raise ApiError(404, "cookbook page unavailable")
+        _send_file(handler, file)
+        return
+
     if method == "GET" and path == "/api/recipes":
         with _connect() as con:
-            _send_json(handler, 200, {"recipes": kitchen.list_recipes(con)})
+            _send_json(handler, 200, {
+                "recipes": kitchen.list_recipes(con),
+                "cookbooks_available": (db.default_db_path().parent / "cookbooks/index.html").is_file(),
+            })
         return
 
     if method == "POST" and path == "/api/recipes":

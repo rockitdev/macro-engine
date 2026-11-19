@@ -412,6 +412,32 @@ def set_week_start(con: sqlite3.Connection, day: str) -> dict:
     return {"week_starts_on": name}
 
 
+def set_day_complete(con: sqlite3.Connection, date: str | None = None,
+                     complete: bool = True, *, today: str | None = None) -> dict:
+    """Mark a day fully logged (or reopen it). Only complete days feed the
+    week bank. A future day can't be closed; reopening is always allowed."""
+    day = _valid_date(date) if date else _today()
+    today_s = _valid_date(today) if today else _today()
+    if complete:
+        if day > today_s:
+            raise ValueError("can't mark a future day complete")
+        con.execute("INSERT OR IGNORE INTO closed_days (date) VALUES (?)", (day,))
+    else:
+        con.execute("DELETE FROM closed_days WHERE date = ?", (day,))
+    con.commit()
+    return {"date": day, "complete": is_day_complete(con, day)}
+
+
+def is_day_complete(con: sqlite3.Connection, date: str) -> bool:
+    return con.execute(
+        "SELECT 1 FROM closed_days WHERE date = ?", (date,)).fetchone() is not None
+
+
+def _closed_between(con: sqlite3.Connection, start: str, end: str) -> set[str]:
+    return {r["date"] for r in con.execute(
+        "SELECT date FROM closed_days WHERE date BETWEEN ? AND ?", (start, end))}
+
+
 def _day_sums(con: sqlite3.Connection, date: str) -> dict:
     """Unrounded totals for one date. Week math rounds once, at the end."""
     row = con.execute(
@@ -434,9 +460,16 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
     day before the next one. ``start`` and ``end`` are inclusive.
 
     ``saved`` is kcal, carb_g, and fat_g left unused on earlier days of this
-    week that already had a target. Today is excluded because the day is not
-    finished. Positive is under target, negative is over. None when today
-    falls outside the week, or when no earlier day had a target.
+    week that had a target and were marked complete (``set_day_complete``).
+    An unmarked day banks nothing: a forgotten meal must not pass for a real
+    deficit. Each day's credit is capped at 50% of its target; overruns are
+    not capped. Today is excluded because the day is not finished. Positive is
+    under target, negative is over. None when today falls outside the week, or
+    when no earlier day was complete.
+
+    ``open_days`` lists earlier days this week that have a target but are not
+    marked complete, so the caller can offer to close them. Each day row
+    carries ``complete``.
 
     ``room_today`` is how much of those three can still be eaten today while
     later days stay on their own targets: today's remaining plus ``saved``.
@@ -465,6 +498,8 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
     saved_days = 0
     today_targets = None
     today_raw = None
+    open_days = []
+    closed = _closed_between(con, start.isoformat(), end.isoformat())
 
     for offset in range(7):
         day = start + _dt.timedelta(days=offset)
@@ -486,35 +521,27 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
                 target_raw[key] += float(goal)
                 under[key] = round(float(goal) - shown[key], 1)
             if in_week and day < today_d:
-                # Option A: skip days that look like incomplete logging.
-                # A day with zero entries was never touched. A day whose kcal
-                # logged is below 50% of the kcal target almost certainly has
-                # a missed meal — same heuristic used by coach.empirical_maintenance
-                # (coach.py:560-562). Crediting phantom deficits on those days
-                # would inflate room_today.
-                kcal_target = targets.get("kcal") if targets else None
-                if raw["entries"] == 0 or (
-                    kcal_target is not None
-                    and raw["kcal"] < 0.5 * float(kcal_target)
-                ):
-                    continue  # treat as incomplete; bank nothing
-
-                saved_days += 1
-                for key in BANK:
-                    goal = targets[key]
-                    if goal is not None:
-                        raw_delta = float(goal) - raw[key]
-                        # Option C (defense-in-depth): cap each day's credit so
-                        # one under-logged day can't bank more than 50% of its
-                        # own target. One-sided on purpose: overruns are NOT
-                        # capped, so a known overeat is debited in full and
-                        # paid back over the following days (the coaching model).
-                        cap = 0.5 * float(goal)
-                        saved_raw[key] += min(cap, raw_delta)
+                # Only days the user marked complete feed the bank. Logging
+                # volume can't tell a light day from a forgotten dinner.
+                # (No `continue` here: the day must still be listed in days.)
+                if day_s not in closed:
+                    open_days.append(day_s)
+                else:
+                    saved_days += 1
+                    for key in BANK:
+                        goal = targets[key]
+                        if goal is not None:
+                            # Cap each day's credit at 50% of its own target.
+                            # One-sided on purpose: overruns are NOT capped, so
+                            # a known overeat is debited in full and paid back
+                            # over the following days (the coaching model).
+                            cap = 0.5 * float(goal)
+                            saved_raw[key] += min(cap, float(goal) - raw[key])
         if day == today_d:
             today_targets = targets
             today_raw = raw
-        days.append({"date": day_s, "eaten": shown, "targets": targets, "under": under})
+        days.append({"date": day_s, "eaten": shown, "targets": targets, "under": under,
+                     "complete": day_s in closed})
 
     saved = None
     if in_week and saved_days:
@@ -538,6 +565,7 @@ def week_summary(con: sqlite3.Connection, date: str | None = None, *,
         "days": days,
         "saved": saved,
         "room_today": room,
+        "open_days": open_days,
         "week": {
             "target": {k: (round(target_raw[k], 1) if has_target[k] else None) for k in MACROS},
             "eaten": {k: round(eaten_raw[k], 1) for k in MACROS},

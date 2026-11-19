@@ -1,6 +1,8 @@
 import type { AmountChange } from "@/components/amount-sheet"
 import { Composer } from "@/components/composer"
+import { DayClose } from "@/components/day-close"
 import { LogList } from "@/components/log-list"
+import { MealPlanner } from "@/components/meal-planner"
 import { MacroRing } from "@/components/macro-ring"
 import { WeekSidebar } from "@/components/week-sidebar"
 import { formatGrams, formatKcal } from "@/lib/format"
@@ -38,6 +40,7 @@ export function DayView({
   listKey,
   onWeekStart,
   onSelectDay,
+  onDayComplete,
 }: {
   day: Day
   week: Week
@@ -65,6 +68,7 @@ export function DayView({
   listKey: number
   onWeekStart: (day: string) => Promise<void>
   onSelectDay: (date: string) => void
+  onDayComplete: (date: string, complete: boolean) => Promise<void>
 }) {
   const hadFoodIds = new Set(
     day.entries.filter((e) => e.meal === meal && e.food_id != null).map((e) => e.food_id as number),
@@ -85,6 +89,8 @@ export function DayView({
 
         {/* Macro ring + bars */}
         <MacroRing day={day} />
+
+        <MealPlanner key={date} date={date} meal={meal} onMeal={onMeal} stamp={day} onLogged={onLogged} />
 
         {/* Log food panel */}
         <section className="me-card" style={{ padding: 20 }}>
@@ -119,6 +125,8 @@ export function DayView({
           onCopyDay={onCopyDay}
           onSelectStart={onSelectStart}
         />
+
+        <DayClose day={day} today={week.today} onToggle={onDayComplete} />
       </div>
 
       {/* ── Right sidebar ── */}

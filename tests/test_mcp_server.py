@@ -272,6 +272,20 @@ class TestMCPTools(unittest.TestCase):
         if out["saved"] is not None:
             self.assertEqual(set(out["saved"]), {"kcal", "carb_g", "fat_g"})
 
+    def test_close_and_reopen_day(self):
+        self.ms.log_meal(
+            [{"name": "plate", "macros": {"kcal": 500, "protein_g": 30,
+                                          "carb_g": 50, "fat_g": 20}}],
+            date="2026-07-06",
+        )
+        self.assertFalse(self.ms.day_summary(date="2026-07-06")["complete"])
+        self.assertEqual(self.ms.close_day(date="2026-07-06"),
+                         {"date": "2026-07-06", "complete": True})
+        self.assertTrue(self.ms.day_summary(date="2026-07-06")["complete"])
+        self.assertEqual(self.ms.reopen_day("2026-07-06"),
+                         {"date": "2026-07-06", "complete": False})
+        self.assertFalse(self.ms.day_summary(date="2026-07-06")["complete"])
+
     def test_day_summary_with_logged_food(self):
         self.ms.log_meal([{"query": "banana"}, {"query": "egg"}],
                          date="2026-07-17")
